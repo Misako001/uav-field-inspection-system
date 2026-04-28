@@ -1,0 +1,84 @@
+<UserControl x:Class="UAVInspectionDesktop.Views.HeaderBarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Border Style="{StaticResource PanelCardStyle}"
+            Background="{StaticResource HeaderBackgroundBrush}"
+            Padding="18,16"
+            MouseLeftButtonDown="Root_MouseLeftButtonDown">
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.2*" />
+                <ColumnDefinition Width="180" />
+                <ColumnDefinition Width="1.2*" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="{Binding SystemStatus.SystemName}" Style="{StaticResource PageTitleTextStyle}" />
+                <StackPanel Orientation="Horizontal" Margin="2,10,0,0">
+                    <Ellipse Width="10" Height="10" Fill="{Binding HeaderStatusColor}" Margin="0,2,10,0">
+                        <Ellipse.Effect>
+                            <DropShadowEffect BlurRadius="10" ShadowDepth="0" Color="#55FF7F" />
+                        </Ellipse.Effect>
+                    </Ellipse>
+                    <TextBlock Text="{Binding HeaderStatusText}" FontSize="14" FontWeight="SemiBold" />
+                    <TextBlock Text=" · " FontSize="13" Foreground="{StaticResource TextMutedBrush}" />
+                    <TextBlock Text="{Binding HeaderStatusDetail}" Style="{StaticResource CaptionTextStyle}" />
+                </StackPanel>
+            </StackPanel>
+
+            <Border Grid.Column="1" Style="{StaticResource InsetCardStyle}" Padding="18,12">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding ClockTime}" FontFamily="Bahnschrift SemiBold" FontSize="22" Foreground="{StaticResource SuccessBrush}" HorizontalAlignment="Center" />
+                    <TextBlock Text="{Binding ClockDate}" Style="{StaticResource CaptionTextStyle}" Margin="0,6,0,0" HorizontalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <Grid Grid.Column="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="120" />
+                    <ColumnDefinition Width="132" />
+                </Grid.ColumnDefinitions>
+
+                <ItemsControl ItemsSource="{Binding StatusChips}" Margin="0,0,16,0">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Style="{StaticResource TagBorderStyle}" Margin="0,0,10,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Label}" Style="{StaticResource CaptionTextStyle}" />
+                                    <Ellipse Width="8" Height="8" Fill="{Binding AccentColor}" Margin="8,3,8,0" />
+                                    <TextBlock Text="{Binding Value}" FontSize="12" FontWeight="SemiBold" />
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Grid.Column="1" Style="{StaticResource InsetCardStyle}" Padding="14,12" Margin="0,0,14,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="24" />
+                            <RowDefinition Height="24" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="{Binding FpsText, StringFormat=FPS   {0}}" FontFamily="Bahnschrift SemiBold" FontSize="12" />
+                        <TextBlock Grid.Row="1" Text="{Binding LatencyText, StringFormat=延迟   {0}ms}" FontFamily="Bahnschrift SemiBold" FontSize="12" />
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button Style="{StaticResource WindowControlButtonStyle}" Content="─" Click="MinimizeButton_Click" />
+                    <Button x:Name="MaximizeButton" Style="{StaticResource WindowControlButtonStyle}" Content="❐" Margin="8,0,0,0" Click="MaximizeButton_Click" />
+                    <Button Style="{StaticResource WindowCloseButtonStyle}" Content="×" Margin="8,0,0,0" Click="CloseButton_Click" />
+                </StackPanel>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

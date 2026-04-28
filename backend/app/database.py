@@ -25,7 +25,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 def init_db() -> None:
-    from app.models import AlertEvent, DetectionStatistic, SystemConfig  # noqa: F401
+    from app.models import AnalysisFrame, AnalysisJob, AnalysisResult, AlertEvent, DetectionStatistic, SystemConfig  # noqa: F401
     from app.seed import seed_initial_data
 
     Base.metadata.create_all(bind=engine)

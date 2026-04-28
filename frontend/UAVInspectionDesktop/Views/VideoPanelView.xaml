@@ -1,0 +1,91 @@
+<UserControl x:Class="UAVInspectionDesktop.Views.VideoPanelView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Border Style="{StaticResource PanelCardStyle}" Padding="0">
+        <Grid ClipToBounds="True">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="54" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                        <GradientStop Color="#9CB8D6" Offset="0" />
+                        <GradientStop Color="#6D8C90" Offset="0.45" />
+                        <GradientStop Color="#1A2928" Offset="1" />
+                    </LinearGradientBrush>
+                </Grid.Background>
+
+                <Canvas>
+                    <Rectangle Width="1200" Height="165" Fill="#B7CCE2" Opacity="0.7" />
+                    <Rectangle Canvas.Top="170" Width="1200" Height="128" Fill="#77939A" Opacity="0.52" />
+                    <Polygon Points="0,620 150,470 360,505 600,380 840,420 1200,300 1200,680 0,680" Fill="#507A60" Opacity="0.92" />
+                    <Polygon Points="0,430 205,312 430,350 690,250 905,285 1200,214 1200,410 0,500" Fill="#7A896E" Opacity="0.8" />
+                    <Polyline Points="0,545 220,455 480,478 775,385 1200,402" Stroke="#D0DCE8" StrokeThickness="22" Opacity="0.62" />
+                    <Polyline Points="40,594 245,502 520,528 818,430 1200,454" Stroke="#244048" StrokeThickness="5" Opacity="0.52" />
+                    <Rectangle Canvas.Left="92" Canvas.Top="240" Width="170" Height="58" Fill="#E1E7EC" Opacity="0.65" />
+                    <Rectangle Canvas.Left="340" Canvas.Top="220" Width="260" Height="82" Fill="#D5DDE5" Opacity="0.62" />
+                    <Rectangle Canvas.Left="705" Canvas.Top="198" Width="322" Height="104" Fill="#CDD7DF" Opacity="0.58" />
+                    <Rectangle Canvas.Left="70" Canvas.Top="362" Width="1030" Height="2" Fill="#EEF5FB" Opacity="0.46" />
+                </Canvas>
+
+                <Border HorizontalAlignment="Left" VerticalAlignment="Top" Margin="18" Style="{StaticResource InsetCardStyle}" Background="#0C1722" Padding="18,10">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding VideoSceneTitle}" FontSize="14" FontWeight="Bold" />
+                    </StackPanel>
+                </Border>
+
+                <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="18" Style="{StaticResource InsetCardStyle}" Background="#0C1722" Padding="16,12">
+                    <Grid Width="158">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="26" />
+                            <RowDefinition Height="26" />
+                            <RowDefinition Height="26" />
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="{Binding VideoStatus.Resolution, StringFormat=分辨率:  {0}}" FontFamily="Bahnschrift SemiBold" FontSize="13" />
+                        <TextBlock Grid.Row="1" Text="{Binding VideoStatus.Fps, StringFormat=帧率:      {0:F0} FPS}" FontFamily="Bahnschrift SemiBold" FontSize="13" />
+                        <TextBlock Grid.Row="2" Text="{Binding VideoStatus.LatencyMs, StringFormat=延迟:      {0}ms}" FontFamily="Bahnschrift SemiBold" FontSize="13" />
+                    </Grid>
+                </Border>
+
+                <ItemsControl ItemsSource="{Binding OverlayRegions}" Visibility="{Binding IsOverlayEnabled, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="Canvas.Left" Value="{Binding Left}" />
+                            <Setter Property="Canvas.Top" Value="{Binding Top}" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Width="{Binding Width}" Height="{Binding Height}">
+                                <Border BorderBrush="{Binding StrokeColor}" BorderThickness="2" Background="{Binding FillColor}" CornerRadius="4" />
+                                <Border HorizontalAlignment="Left" VerticalAlignment="Top" Background="#0C1722" CornerRadius="4" Margin="8" Padding="8,3">
+                                    <TextBlock Text="{Binding Label}" FontSize="11" FontWeight="SemiBold" />
+                                </Border>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+
+            <Border Grid.Row="1" Background="#0B1721" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="18,0">
+                <Grid>
+                    <TextBlock Text="{Binding VideoStatusBanner}" VerticalAlignment="Center" Foreground="#CFF7E4" />
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button Content="{Binding OverlayButtonText}" Command="{Binding ToggleOverlayCommand}" Style="{StaticResource ActionButtonStyle}" Margin="0,0,10,0" />
+                        <Button Content="{Binding DisplayModeText}" Command="{Binding ToggleDisplayModeCommand}" Style="{StaticResource ActionButtonStyle}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</UserControl>

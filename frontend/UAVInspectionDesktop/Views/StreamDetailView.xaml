@@ -1,0 +1,36 @@
+<UserControl x:Class="UAVInspectionDesktop.Views.StreamDetailView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Border Style="{StaticResource PanelCardStyle}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="36" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <TextBlock Text="{Binding SelectedDetailTitle}" Style="{StaticResource SectionTitleTextStyle}" />
+            <TextBlock Grid.Row="1" Text="{Binding SelectedDetailDescription}" Style="{StaticResource BodyTextStyle}" Margin="0,10,0,0" Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" />
+
+            <ItemsControl Grid.Row="2" ItemsSource="{Binding DetailMetrics}" Margin="0,18,0,0">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource InsetCardStyle}" Margin="0,0,0,10">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Label}" Style="{StaticResource CaptionTextStyle}" VerticalAlignment="Center" />
+                                <TextBlock Grid.Column="1" Text="{Binding Value}" Style="{StaticResource BodyTextStyle}" FontWeight="SemiBold" HorizontalAlignment="Right" VerticalAlignment="Center" TextWrapping="Wrap" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
+    </Border>
+</UserControl>

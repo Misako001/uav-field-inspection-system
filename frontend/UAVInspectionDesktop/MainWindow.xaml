@@ -3,153 +3,33 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:views="clr-namespace:UAVInspectionDesktop.Views"
         xmlns:vm="clr-namespace:UAVInspectionDesktop.ViewModels"
         mc:Ignorable="d"
         Title="大田无人机巡检监控系统"
         Width="1440"
-        Height="900"
-        MinWidth="1180"
+        Height="880"
+        MinWidth="1240"
         MinHeight="760"
-        Background="#07111B"
-        WindowStartupLocation="CenterScreen">
+        Background="{StaticResource WindowBackgroundBrush}"
+        WindowStartupLocation="CenterScreen"
+        WindowState="Maximized"
+        WindowStyle="None"
+        ResizeMode="CanResize">
     <Window.DataContext>
         <vm:MainViewModel />
     </Window.DataContext>
 
-    <Grid Margin="18">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="74" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="210" />
-        </Grid.RowDefinitions>
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0"
+                            ResizeBorderThickness="8"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
 
-        <Border Grid.Row="0" Style="{StaticResource PanelStyle}" Padding="18,12">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="大田无人机巡检监控系统" FontSize="28" FontWeight="SemiBold" Foreground="#F2FBFF" />
-                    <Border Margin="22,0,0,0" Padding="12,5" CornerRadius="14" Background="#113A34" BorderBrush="#2FDEC7" BorderThickness="1">
-                        <TextBlock Text="{Binding SystemStatus.Status}" Foreground="#62F2D8" FontSize="14" />
-                    </Border>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding CurrentTime}" Margin="0,0,20,0" FontSize="15" Foreground="#9FC7D9" />
-                    <TextBlock Text="RTMP" Foreground="#7EA9BA" Margin="0,0,6,0" />
-                    <TextBlock Text="{Binding VideoStatus.RtmpStatus}" Foreground="#62F2D8" Margin="0,0,16,0" />
-                    <TextBlock Text="HLS" Foreground="#7EA9BA" Margin="0,0,6,0" />
-                    <TextBlock Text="{Binding VideoStatus.HlsStatus}" Foreground="#62F2D8" Margin="0,0,16,0" />
-                    <TextBlock Text="检测" Foreground="#7EA9BA" Margin="0,0,6,0" />
-                    <TextBlock Text="{Binding DetectionStatus}" Foreground="#62F2D8" Margin="0,0,16,0" />
-                    <TextBlock Text="{Binding VideoStatus.Fps, StringFormat=FPS {0:F1}}" Foreground="#F5D76E" Margin="0,0,16,0" />
-                    <TextBlock Text="{Binding VideoStatus.LatencyMs, StringFormat=延迟 {0}ms}" Foreground="#F5D76E" />
-                </StackPanel>
-            </Grid>
-        </Border>
-
-        <Grid Grid.Row="1" Margin="0,16,0,16">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="2.1*" />
-                <ColumnDefinition Width="1.1*" />
-                <ColumnDefinition Width="300" />
-            </Grid.ColumnDefinitions>
-
-            <Border Grid.Column="0" Style="{StaticResource PanelStyle}" Padding="0">
-                <Grid>
-                    <Grid.Background>
-                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                            <GradientStop Color="#0A1A26" Offset="0" />
-                            <GradientStop Color="#123C42" Offset="0.55" />
-                            <GradientStop Color="#081019" Offset="1" />
-                        </LinearGradientBrush>
-                    </Grid.Background>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="58" />
-                    </Grid.RowDefinitions>
-                    <Canvas Grid.Row="0" ClipToBounds="True">
-                        <Rectangle Width="860" Height="520" Fill="#0B2532" Opacity="0.72" />
-                        <Polyline Points="80,410 210,350 340,365 505,285 680,310 810,230"
-                                  Stroke="#46D7C9" StrokeThickness="3" Opacity="0.85" />
-                        <Polyline Points="0,120 860,92" Stroke="#1D5668" StrokeThickness="2" Opacity="0.55" />
-                        <Polyline Points="0,260 860,236" Stroke="#1D5668" StrokeThickness="2" Opacity="0.42" />
-                        <TextBlock Canvas.Left="34" Canvas.Top="28" Text="UAV FIELD LIVE" Foreground="#7DEDE2" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Canvas.Left="34" Canvas.Top="58" Text="模拟无人机巡检画面" Foreground="#B9D7E3" FontSize="15" />
-                    </Canvas>
-                    <Grid Grid.Row="1" Background="#0B1824">
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                            <TextBlock Text="{Binding VideoStatus.Resolution, StringFormat=分辨率 {0}}" Margin="0,0,30,0" Foreground="#A5C9D7" />
-                            <TextBlock Text="{Binding VideoStatus.Fps, StringFormat=帧率 {0:F1} FPS}" Margin="0,0,30,0" Foreground="#A5C9D7" />
-                            <TextBlock Text="{Binding VideoStatus.LatencyMs, StringFormat=链路延迟 {0} ms}" Foreground="#A5C9D7" />
-                        </StackPanel>
-                    </Grid>
-                </Grid>
-            </Border>
-
-            <StackPanel Grid.Column="1" Margin="16,0">
-                <Border Style="{StaticResource PanelStyle}" Height="134" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock Text="总检测数" Foreground="#8FB7C9" FontSize="15" />
-                        <TextBlock Text="{Binding DetectionStatistics.TotalCount}" FontSize="38" FontWeight="SemiBold" Foreground="#F4FBFF" Margin="0,12,0,0" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource PanelStyle}" Height="134" Margin="0,0,0,14">
-                    <StackPanel>
-                        <TextBlock Text="当前分钟检测数" Foreground="#8FB7C9" FontSize="15" />
-                        <TextBlock Text="{Binding DetectionStatistics.CurrentMinuteCount}" FontSize="38" FontWeight="SemiBold" Foreground="#62F2D8" Margin="0,12,0,0" />
-                    </StackPanel>
-                </Border>
-                <Border Style="{StaticResource PanelStyle}" Height="134">
-                    <StackPanel>
-                        <TextBlock Text="风险指数" Foreground="#8FB7C9" FontSize="15" />
-                        <TextBlock Text="{Binding DetectionStatistics.RiskIndex, StringFormat={}{0:F1}}" FontSize="38" FontWeight="SemiBold" Foreground="#FFB84D" Margin="0,12,0,0" />
-                    </StackPanel>
-                </Border>
-            </StackPanel>
-
-            <Border Grid.Column="2" Style="{StaticResource PanelStyle}">
-                <StackPanel>
-                    <TextBlock Text="快捷入口" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,18" />
-                    <Button Style="{StaticResource QuickButtonStyle}" Content="直播详情" />
-                    <Button Style="{StaticResource QuickButtonStyle}" Content="系统诊断" />
-                    <Button Style="{StaticResource QuickButtonStyle}" Content="配置管理" />
-                    <Button Style="{StaticResource QuickButtonStyle}" Content="病虫害预测" />
-                    <Button Style="{StaticResource QuickButtonStyle}" Content="烟田数字孪生" />
-                    <Button Style="{StaticResource QuickButtonStyle}" Content="数据分析" />
-                </StackPanel>
-            </Border>
-        </Grid>
-
-        <Border Grid.Row="2" Style="{StaticResource PanelStyle}">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="34" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <TextBlock Text="告警时间轴" FontSize="20" FontWeight="SemiBold" />
-                <DataGrid Grid.Row="1"
-                          ItemsSource="{Binding Alerts}"
-                          AutoGenerateColumns="False"
-                          HeadersVisibility="Column"
-                          CanUserAddRows="False"
-                          IsReadOnly="True"
-                          Background="#0E1722"
-                          BorderBrush="#243A4D"
-                          Foreground="#E6F4FF"
-                          RowBackground="#101D2A"
-                          AlternatingRowBackground="#0C1722"
-                          GridLinesVisibility="None">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="时间" Binding="{Binding OccurredAt, StringFormat=yyyy-MM-dd HH:mm:ss}" Width="180" />
-                        <DataGridTextColumn Header="类型" Binding="{Binding AlertType}" Width="120" />
-                        <DataGridTextColumn Header="内容" Binding="{Binding Content}" Width="*" />
-                        <DataGridTextColumn Header="置信度" Binding="{Binding Confidence, StringFormat=P0}" Width="90" />
-                        <DataGridTextColumn Header="状态" Binding="{Binding Status}" Width="100" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </Grid>
-        </Border>
+    <Grid>
+        <views:MainDashboardView />
     </Grid>
 </Window>

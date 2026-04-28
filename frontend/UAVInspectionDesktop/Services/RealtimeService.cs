@@ -13,7 +13,7 @@ public sealed class RealtimeService
     private readonly Uri _webSocketUri;
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
 
-    public RealtimeService(string webSocketUrl = "ws://localhost:8000/ws/realtime")
+    public RealtimeService(string webSocketUrl = "ws://127.0.0.1:8000/ws/realtime")
     {
         _webSocketUri = new Uri(webSocketUrl);
     }

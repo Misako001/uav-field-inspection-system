@@ -3,33 +3,14 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <SolidColorBrush x:Key="PanelBrush" Color="#121A24" />
-        <SolidColorBrush x:Key="PanelBorderBrush" Color="#20384D" />
-        <SolidColorBrush x:Key="AccentBrush" Color="#38D6C9" />
-
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="#E6F4FF" />
-            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
-        </Style>
-
-        <Style x:Key="PanelStyle" TargetType="Border">
-            <Setter Property="Background" Value="{StaticResource PanelBrush}" />
-            <Setter Property="BorderBrush" Value="{StaticResource PanelBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="6" />
-            <Setter Property="Padding" Value="16" />
-        </Style>
-
-        <Style x:Key="QuickButtonStyle" TargetType="Button">
-            <Setter Property="Height" Value="48" />
-            <Setter Property="Margin" Value="0,0,0,10" />
-            <Setter Property="Background" Value="#162536" />
-            <Setter Property="BorderBrush" Value="#2A516B" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#E6F4FF" />
-            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
-            <Setter Property="FontSize" Value="15" />
-            <Setter Property="Cursor" Value="Hand" />
-        </Style>
+        <ResourceDictionary>
+            <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Colors.xaml" />
+                <ResourceDictionary Source="Themes/Typography.xaml" />
+                <ResourceDictionary Source="Themes/Cards.xaml" />
+                <ResourceDictionary Source="Themes/Controls.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

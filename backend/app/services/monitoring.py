@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import AlertEvent, DetectionStatistic
 from app.schemas import AlertEventRead, DetectionStatistics, SystemStatus, VideoStatus
+from app.services.analysis import get_latest_analysis_summary
 
 
 def get_system_status() -> SystemStatus:
@@ -71,4 +72,5 @@ def get_realtime_payload(db: Session) -> dict[str, Any]:
         "detection": get_detection_statistics(db),
         "alerts": get_alerts(db, limit=5),
         "config": get_system_config(),
+        "latest_analysis": get_latest_analysis_summary(db),
     }

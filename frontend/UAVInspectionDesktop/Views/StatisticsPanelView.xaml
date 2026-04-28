@@ -1,0 +1,41 @@
+<UserControl x:Class="UAVInspectionDesktop.Views.StatisticsPanelView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d">
+    <Border Style="{StaticResource PanelCardStyle}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="38" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <TextBlock Text="检测统计" Style="{StaticResource SectionTitleTextStyle}" />
+                <TextBlock Text="{Binding DetectionDeltaText}" HorizontalAlignment="Right" Style="{StaticResource CaptionTextStyle}" />
+            </Grid>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Style="{StaticResource InsetCardStyle}" Margin="0,0,8,0">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding DetectionStatistics.TotalCount}" Style="{StaticResource MetricValueTextStyle}" FontSize="38" Foreground="{StaticResource SuccessBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="总检测数" Style="{StaticResource MetricCaptionTextStyle}" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" Style="{StaticResource InsetCardStyle}" Margin="8,0,0,0">
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding DetectionStatistics.CurrentMinuteCount}" Style="{StaticResource MetricValueTextStyle}" FontSize="38" Foreground="{StaticResource InfoBrush}" HorizontalAlignment="Center" />
+                        <TextBlock Text="当前分钟" Style="{StaticResource MetricCaptionTextStyle}" HorizontalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+    </Border>
+</UserControl>

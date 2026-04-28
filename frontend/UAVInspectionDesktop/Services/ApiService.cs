@@ -12,7 +12,7 @@ public sealed class ApiService
 {
     private readonly HttpClient _httpClient;
 
-    public ApiService(string baseUrl = "http://localhost:8000")
+    public ApiService(string baseUrl = "http://127.0.0.1:8000")
     {
         _httpClient = new HttpClient
         {
