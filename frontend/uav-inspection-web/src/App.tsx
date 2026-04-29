@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import ReactECharts from 'echarts-for-react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 
 import {
   apiBaseUrl,
+  createStreamJob,
   fetchJobDetail,
   fetchJobList,
   openAnalysisRealtimeSocket,
@@ -11,95 +12,131 @@ import {
   toAbsoluteAssetUrl,
   uploadImage,
   uploadVideo,
-  createStreamJob,
 } from './api';
+import { AppShell } from './components/AppShell';
+import { HistoryPage } from './pages/HistoryPage';
+import { HomePage } from './pages/HomePage';
+import { AnalysisPage } from './pages/AnalysisPage';
 import type {
   AnalysisFrame,
   AnalysisJob,
   AnalysisJobDetail,
-  AnalysisResult,
+  AppRoute,
   DashboardRealtimePayload,
-  JobStatus,
+  DetailTarget,
+  FramePreviewState,
+  HistorySelectionState,
+  HomeOverviewCard,
+  MetricCardData,
+  MetricDefinition,
   PreviewMode,
-  SourceType,
 } from './types';
+import { clamp, formatDateTime, formatNumber, formatPercent, sourceLabel, statusLabel, statusTone } from './utils';
 
 type InputTab = 'image' | 'video' | 'stream';
 
 const INITIAL_STREAM_URL = 'demo://field-inspection';
 
-function formatPercent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
-}
+const metricDefinitions: MetricDefinition[] = [
+  {
+    key: 'coverage',
+    label: '杂草覆盖面积占比',
+    shortLabel: '覆盖率',
+    description: '当前结果中被识别为杂草区域的像素面积占比，用于快速判断地块受杂草影响的范围。',
+    formula: '杂草掩码像素数 / 有效图像像素数',
+    tone: 'success',
+  },
+  {
+    key: 'plants',
+    label: '估算杂草植株数',
+    shortLabel: '植株估算',
+    description: '基于杂草二值掩码连通域的估算值，适合做批量趋势研判和任务对比。',
+    formula: '杂草二值掩码连通域计数',
+    tone: 'warning',
+  },
+  {
+    key: 'confidence',
+    label: '平均置信度',
+    shortLabel: '置信度',
+    description: '模型对当前杂草识别结果的平均概率信心，用来辅助判断结果是否稳定。',
+    formula: '杂草区域平均概率',
+    tone: 'info',
+  },
+  {
+    key: 'samples',
+    label: '处理样本数',
+    shortLabel: '样本数',
+    description: '图片任务显示样本数，视频和实时流任务显示已处理帧数。',
+    formula: '图片=1；视频/流=累计关键帧数',
+    tone: 'neutral',
+  },
+  {
+    key: 'processing',
+    label: '单次分析耗时',
+    shortLabel: '分析耗时',
+    description: '当前选中结果的模型推理与后处理耗时，用于判断分析链路的实时性。',
+    formula: '图像预处理 + 模型推理 + 结果落盘',
+    tone: 'info',
+  },
+  {
+    key: 'resultTime',
+    label: '结果时间',
+    shortLabel: '结果时间',
+    description: '当前结果生成的时间戳，适合配合趋势和历史任务做时序分析。',
+    formula: '结果生成时间',
+    tone: 'muted',
+  },
+];
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return '--';
-  }
-  return new Date(value).toLocaleString('zh-CN', {
-    hour12: false,
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-}
-
-function statusTone(status: JobStatus): string {
-  switch (status) {
-    case 'completed':
-      return 'success';
-    case 'running':
-      return 'info';
-    case 'failed':
-      return 'danger';
-    case 'stopped':
-      return 'warning';
-    default:
-      return 'muted';
-  }
-}
-
-function sourceLabel(sourceType: SourceType): string {
-  switch (sourceType) {
-    case 'image':
-      return '图片';
-    case 'video':
-      return '视频';
-    case 'stream':
-      return '实时流';
-    default:
-      return sourceType;
-  }
+function toneMeter(value: number): number {
+  return clamp(value, 0, 1);
 }
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const analysisSocketRef = useRef<WebSocket | null>(null);
+
   const [dashboard, setDashboard] = useState<DashboardRealtimePayload | null>(null);
   const [historyJobs, setHistoryJobs] = useState<AnalysisJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<AnalysisJobDetail | null>(null);
   const [activeTab, setActiveTab] = useState<InputTab>('image');
-  const [previewMode, setPreviewMode] = useState<PreviewMode>('heatmap');
+  const [compareMode, setCompareMode] = useState<Exclude<PreviewMode, 'source'>>('heatmap');
   const [streamUrl, setStreamUrl] = useState(INITIAL_STREAM_URL);
-  const [selectedHistoryType, setSelectedHistoryType] = useState<string>('');
-  const [selectedHistoryStatus, setSelectedHistoryStatus] = useState<string>('');
+  const [historySelection, setHistorySelection] = useState<HistorySelectionState>({
+    selectedHistoryType: '',
+    selectedHistoryStatus: '',
+  });
   const [message, setMessage] = useState('系统已就绪，可直接开始杂草分割分析，支持图片、视频和实时流。');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isBackendOnline, setIsBackendOnline] = useState(true);
-  const analysisSocketRef = useRef<WebSocket | null>(null);
+  const [imageFileName, setImageFileName] = useState('');
+  const [videoFileName, setVideoFileName] = useState('');
+  const [selectedFrameId, setSelectedFrameId] = useState<number | null>(null);
+  const [hoveredDetailTarget, setHoveredDetailTarget] = useState<DetailTarget | null>(null);
+  const [lockedDetailTarget, setLockedDetailTarget] = useState<DetailTarget | null>(null);
+  const [showOverlay, setShowOverlay] = useState(true);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.78);
+  const [fitMode, setFitMode] = useState<'contain' | 'cover'>('contain');
+  const [zoomLevel, setZoomLevel] = useState(1);
 
   useEffect(() => {
     let mounted = true;
     const dashboardSocket = openDashboardRealtimeSocket((payload) => {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       setDashboard(payload);
       setIsBackendOnline(true);
     });
+
     dashboardSocket.onclose = () => {
       if (mounted) {
         setIsBackendOnline(false);
       }
     };
+
     dashboardSocket.onerror = () => {
       if (mounted) {
         setIsBackendOnline(false);
@@ -116,7 +153,12 @@ export default function App() {
 
   useEffect(() => {
     void refreshHistory();
-  }, [selectedHistoryType, selectedHistoryStatus]);
+  }, [historySelection.selectedHistoryStatus, historySelection.selectedHistoryType]);
+
+  useEffect(() => {
+    setHoveredDetailTarget(null);
+    setLockedDetailTarget(null);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!selectedJob) {
@@ -136,7 +178,7 @@ export default function App() {
           return current;
         }
         const mergedFrames = payload.frames.length > 0
-          ? [...current.frames.filter((frame) => frame.id !== payload.frames[0].id), ...payload.frames].slice(-10)
+          ? [...current.frames.filter((frame) => frame.id !== payload.frames[0].id), ...payload.frames].slice(-12)
           : current.frames;
         return {
           job: payload.job,
@@ -144,7 +186,7 @@ export default function App() {
           frames: mergedFrames,
         };
       });
-      void refreshHistory();
+      void refreshHistory(false);
     });
     analysisSocketRef.current = socket;
 
@@ -156,96 +198,544 @@ export default function App() {
     };
   }, [selectedJob?.job.id, selectedJob?.job.status]);
 
-  const currentResult: AnalysisResult | null = selectedJob?.latest_result ?? null;
-  const currentFrame: AnalysisFrame | null = selectedJob?.frames.at(-1) ?? null;
-  const shouldRenderVideo = previewMode === 'source' && selectedJob?.job.source_type === 'video' && !!selectedJob.job.source_media_path;
-  const imageSourcePath = useMemo(() => {
-    if (previewMode === 'source') {
-      if (selectedJob?.job.source_type === 'image') {
-        return toAbsoluteAssetUrl(selectedJob.job.source_media_path || currentResult?.source_image_path);
-      }
-      if (selectedJob?.job.source_type === 'video') {
-        return toAbsoluteAssetUrl(currentFrame?.source_frame_path);
-      }
-      return toAbsoluteAssetUrl(currentFrame?.source_frame_path ?? currentResult?.source_image_path);
+  useEffect(() => {
+    if (!selectedJob) {
+      setSelectedFrameId(null);
+      return;
     }
-    if (previewMode === 'mask') {
-      return toAbsoluteAssetUrl(currentFrame?.mask_image_path ?? currentResult?.mask_image_path);
+    if (selectedJob.frames.length === 0) {
+      setSelectedFrameId(null);
+      return;
     }
-    return toAbsoluteAssetUrl(currentFrame?.heatmap_image_path ?? currentResult?.heatmap_image_path);
-  }, [currentFrame, currentResult, previewMode, selectedJob]);
+    setSelectedFrameId((current) => {
+      if (current && selectedJob.frames.some((frame) => frame.id === current)) {
+        return current;
+      }
+      return selectedJob.frames.at(-1)?.id ?? null;
+    });
+  }, [selectedJob?.job.id, selectedJob?.frames]);
 
-  const trendOption = useMemo(() => {
-    const recent = [...historyJobs].slice(0, 8).reverse();
-    return {
-      backgroundColor: 'transparent',
-      textStyle: { color: '#d7e7f6' },
-      tooltip: { trigger: 'axis' },
-      grid: { left: 36, right: 20, top: 30, bottom: 28 },
-      xAxis: {
-        type: 'category',
-        data: recent.map((job) => new Date(job.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })),
-        axisLabel: { color: '#8fa3b8' },
-        axisLine: { lineStyle: { color: '#1f3246' } },
+  useEffect(() => {
+    if (location.pathname !== '/analysis') {
+      return;
+    }
+    const rawJobId = searchParams.get('jobId');
+    if (!rawJobId) {
+      return;
+    }
+    const jobId = Number(rawJobId);
+    if (!Number.isFinite(jobId) || jobId <= 0 || selectedJob?.job.id === jobId) {
+      return;
+    }
+
+    void openHistoryJob(jobId, false);
+  }, [location.pathname, searchParams, selectedJob?.job.id]);
+
+  const currentResult = selectedJob?.latest_result ?? null;
+  const selectedFrame = useMemo(() => {
+    if (!selectedJob || selectedJob.frames.length === 0) {
+      return null;
+    }
+    return selectedJob.frames.find((frame) => frame.id === selectedFrameId) ?? selectedJob.frames.at(-1) ?? null;
+  }, [selectedFrameId, selectedJob]);
+
+  const sourceImagePath = useMemo(() => {
+    if (selectedFrame?.source_frame_path) {
+      return toAbsoluteAssetUrl(selectedFrame.source_frame_path);
+    }
+    if (selectedJob?.job.source_type === 'image') {
+      return toAbsoluteAssetUrl(selectedJob.job.source_media_path || currentResult?.source_image_path);
+    }
+    return toAbsoluteAssetUrl(currentResult?.source_image_path);
+  }, [currentResult?.source_image_path, selectedFrame?.source_frame_path, selectedJob]);
+
+  const compareImagePath = useMemo(() => {
+    if (compareMode === 'mask') {
+      return toAbsoluteAssetUrl(selectedFrame?.mask_image_path ?? currentResult?.mask_image_path);
+    }
+    return toAbsoluteAssetUrl(selectedFrame?.heatmap_image_path ?? currentResult?.heatmap_image_path);
+  }, [compareMode, currentResult?.heatmap_image_path, currentResult?.mask_image_path, selectedFrame?.heatmap_image_path, selectedFrame?.mask_image_path]);
+
+  const sourceVideoPath = toAbsoluteAssetUrl(selectedJob?.job.source_media_path);
+  const shouldRenderSourceVideo = selectedJob?.job.source_type === 'video' && !selectedFrame && !!selectedJob.job.source_media_path;
+
+  const framePreviewStates = useMemo<FramePreviewState[]>(() => {
+    if (!selectedJob) {
+      return [];
+    }
+    return selectedJob.frames.map((frame) => ({
+      id: frame.id,
+      title: `关键帧 ${frame.frame_index}`,
+      timestampLabel: `${frame.frame_timestamp_seconds.toFixed(1)}s`,
+      coverageLabel: `覆盖率 ${formatPercent(frame.weed_coverage_ratio)}`,
+      plantLabel: `植株 ${frame.estimated_plant_count}`,
+      confidenceLabel: `置信度 ${(frame.average_confidence * 100).toFixed(1)}%`,
+      previewImagePath: toAbsoluteAssetUrl(frame.heatmap_image_path),
+      active: frame.id === selectedFrame?.id,
+    }));
+  }, [selectedFrame?.id, selectedJob]);
+
+  const trendJobs = useMemo(() => [...historyJobs].slice(0, 8).reverse(), [historyJobs]);
+
+  const metricCards = useMemo<MetricCardData[]>(() => {
+    const coverageRatio = selectedFrame?.weed_coverage_ratio ?? currentResult?.weed_coverage_ratio ?? 0;
+    const estimatedPlants = selectedFrame?.estimated_plant_count ?? currentResult?.estimated_plant_count ?? 0;
+    const avgConfidence = selectedFrame?.average_confidence ?? currentResult?.average_confidence ?? selectedJob?.job.average_confidence ?? 0;
+    const sampleCount = selectedJob ? (selectedJob.job.source_type === 'image' ? 1 : Math.max(selectedJob.job.frame_count, selectedJob.frames.length)) : 0;
+    const processingTime = currentResult?.processing_time_ms ?? 0;
+    const resultTime = currentResult ? formatDateTime(currentResult.result_time) : '--';
+
+    return [
+      {
+        key: 'coverage',
+        label: '杂草覆盖面积占比',
+        value: currentResult || selectedFrame ? formatPercent(coverageRatio) : '--',
+        tone: 'success',
+        hint: '识别范围',
+        footnote: '越高表示当前画面中杂草区域越集中',
+        meter: toneMeter(coverageRatio),
+        trend: trendJobs.map((job) => job.average_coverage_ratio),
       },
-      yAxis: [
-        {
-          type: 'value',
-          name: '覆盖率',
-          axisLabel: {
-            color: '#8fa3b8',
-            formatter: (value: number) => `${value * 100}%`,
-          },
-          splitLine: { lineStyle: { color: 'rgba(30, 54, 78, 0.5)' } },
+      {
+        key: 'plants',
+        label: '估算杂草植株数',
+        value: currentResult || selectedFrame ? `${estimatedPlants}` : '--',
+        tone: 'warning',
+        hint: '连通域估算',
+        footnote: '适合做批次趋势对比，不代表逐株精确计数',
+        meter: toneMeter(estimatedPlants / 200),
+        trend: trendJobs.map((job) => job.estimated_plant_count),
+      },
+      {
+        key: 'confidence',
+        label: '平均置信度',
+        value: currentResult || selectedFrame ? `${(avgConfidence * 100).toFixed(1)}%` : '--',
+        tone: 'info',
+        hint: '模型稳定性',
+        footnote: '当热力分布很散时，建议结合原图与掩码一起复核',
+        meter: toneMeter(avgConfidence),
+        trend: trendJobs.map((job) => job.average_confidence),
+      },
+      {
+        key: 'samples',
+        label: selectedJob?.job.source_type === 'image' ? '处理样本数' : '处理帧数',
+        value: selectedJob ? `${sampleCount}` : '--',
+        tone: 'neutral',
+        hint: '任务体量',
+        footnote: '样本越多，趋势判断越稳，但任务耗时也会增加',
+        meter: toneMeter(sampleCount / 24),
+        trend: trendJobs.map((job) => job.frame_count || (job.source_type === 'image' ? 1 : 0)),
+      },
+      {
+        key: 'processing',
+        label: '单次分析耗时',
+        value: currentResult ? `${processingTime} ms` : '--',
+        tone: 'info',
+        hint: '结果延迟',
+        footnote: '当前图像完成一次推理与后处理所消耗的时间',
+        meter: toneMeter(processingTime / 4000),
+        trend: trendJobs.map((job) => job.frame_count || 1),
+      },
+      {
+        key: 'resultTime',
+        label: '结果时间',
+        value: resultTime,
+        tone: 'muted',
+        hint: '时间戳',
+        footnote: '适合与实时流状态、历史趋势和关键帧对照查看',
+        meter: currentResult ? 1 : 0,
+        trend: trendJobs.map((_, index) => index + 1),
+      },
+    ];
+  }, [currentResult, selectedFrame, selectedJob, trendJobs]);
+
+  const trendOption = useMemo(() => ({
+    backgroundColor: 'transparent',
+    animation: false,
+    textStyle: { color: '#d7e7f6' },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(9, 18, 28, 0.96)',
+      borderColor: '#274561',
+      textStyle: { color: '#ecf5ff' },
+      formatter: (params: Array<{ seriesName: string; data: number; axisValueLabel: string }>) => {
+        const lines = params.map((item) => {
+          if (item.seriesName === '覆盖率') {
+            return `${item.seriesName}: ${(item.data * 100).toFixed(1)}%`;
+          }
+          if (item.seriesName === '平均置信度') {
+            return `${item.seriesName}: ${(item.data * 100).toFixed(1)}%`;
+          }
+          return `${item.seriesName}: ${item.data}`;
+        });
+        return [params[0]?.axisValueLabel ?? '', ...lines].join('<br/>');
+      },
+    },
+    grid: { left: 44, right: 24, top: 38, bottom: 34 },
+    legend: {
+      top: 4,
+      textStyle: { color: '#92aac0' },
+    },
+    xAxis: {
+      type: 'category',
+      data: trendJobs.map((job) => new Date(job.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })),
+      axisLabel: { color: '#8fa3b8' },
+      axisLine: { lineStyle: { color: '#1f3246' } },
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '覆盖率 / 置信度',
+        min: 0,
+        max: 1,
+        axisLabel: {
+          color: '#8fa3b8',
+          formatter: (value: number) => `${Math.round(value * 100)}%`,
         },
-        {
-          type: 'value',
-          name: '植株估算',
-          axisLabel: { color: '#8fa3b8' },
-          splitLine: { show: false },
-        },
-      ],
-      series: [
-        {
-          name: '覆盖率',
-          type: 'line',
-          smooth: true,
-          data: recent.map((job) => job.average_coverage_ratio),
-          lineStyle: { color: '#21d07a', width: 3 },
-          areaStyle: { color: 'rgba(33, 208, 122, 0.16)' },
-          symbolSize: 8,
-        },
-        {
-          name: '植株估算',
-          type: 'bar',
-          yAxisIndex: 1,
-          data: recent.map((job) => job.estimated_plant_count),
-          itemStyle: { color: '#35a7ff', borderRadius: [6, 6, 0, 0] },
-          barMaxWidth: 18,
-        },
+        splitLine: { lineStyle: { color: 'rgba(30, 54, 78, 0.5)' } },
+      },
+      {
+        type: 'value',
+        name: '植株估算',
+        axisLabel: { color: '#8fa3b8' },
+        splitLine: { show: false },
+      },
+    ],
+    series: [
+      {
+        name: '覆盖率',
+        type: 'line',
+        smooth: true,
+        data: trendJobs.map((job) => job.average_coverage_ratio),
+        lineStyle: { color: '#21d07a', width: 3 },
+        areaStyle: { color: 'rgba(33, 208, 122, 0.16)' },
+        itemStyle: { color: '#21d07a' },
+        symbolSize: 8,
+      },
+      {
+        name: '平均置信度',
+        type: 'line',
+        smooth: true,
+        data: trendJobs.map((job) => job.average_confidence),
+        lineStyle: { color: '#35a7ff', width: 2, type: 'dashed' },
+        itemStyle: { color: '#35a7ff' },
+        symbolSize: 7,
+      },
+      {
+        name: '植株估算',
+        type: 'bar',
+        yAxisIndex: 1,
+        data: trendJobs.map((job) => job.estimated_plant_count),
+        itemStyle: { color: '#f5c24e', borderRadius: [6, 6, 0, 0] },
+        barMaxWidth: 18,
+      },
+    ],
+  }), [trendJobs]);
+
+  function buildDefaultDetailTarget(): DetailTarget {
+    if (!selectedJob) {
+      return {
+        id: 'default-empty',
+        type: 'summary',
+        title: '等待分析任务',
+        subtitle: '系统已就绪',
+        description: '上传图片、视频或实时流后，这里会解释当前图像、统计指标和历史趋势之间的关系。',
+        tone: 'muted',
+        badge: '待接入',
+        note: '当前没有选中的分析任务。建议先上传一张田间图像，工作台会自动进入双栏对比与详情联动模式。',
+        fields: [
+          { label: '后端地址', value: apiBaseUrl },
+          { label: '模型状态', value: isBackendOnline ? '可用' : '离线', tone: isBackendOnline ? 'success' : 'danger' },
+          { label: '实时流', value: dashboard?.video.hls_status ?? '--' },
+          { label: '当前模式', value: '图像优先工作台' },
+        ],
+      };
+    }
+
+    const coverage = selectedFrame?.weed_coverage_ratio ?? currentResult?.weed_coverage_ratio ?? 0;
+    const plants = selectedFrame?.estimated_plant_count ?? currentResult?.estimated_plant_count ?? 0;
+    const confidence = selectedFrame?.average_confidence ?? currentResult?.average_confidence ?? selectedJob.job.average_confidence ?? 0;
+
+    return {
+      id: `summary-${selectedJob.job.id}`,
+      type: 'summary',
+      title: `${sourceLabel(selectedJob.job.source_type)}任务 #${selectedJob.job.id}`,
+      subtitle: `${statusLabel(selectedJob.job.status)} · ${selectedJob.job.model_backend}`,
+      description: currentResult?.summary_note ?? '当前详情面板正在汇总主舞台、指标卡和历史趋势中的关键结果。',
+      tone: statusTone(selectedJob.job.status),
+      badge: sourceLabel(selectedJob.job.source_type),
+      imagePath: compareImagePath || sourceImagePath || undefined,
+      note: '如果你想持续查看某个统计口径或关键帧，可以直接点击它，详情检查器会锁定内容。',
+      fields: [
+        { label: '覆盖率', value: currentResult || selectedFrame ? formatPercent(coverage) : '--', tone: 'success' },
+        { label: '植株估算', value: currentResult || selectedFrame ? `${plants}` : '--', tone: 'warning' },
+        { label: '平均置信度', value: currentResult || selectedFrame ? `${(confidence * 100).toFixed(1)}%` : '--', tone: 'info' },
+        { label: '结果时间', value: currentResult ? formatDateTime(currentResult.result_time) : '--' },
       ],
     };
-  }, [historyJobs]);
+  }
 
-  async function refreshHistory() {
+  function buildMetricDetailTarget(metricKey: string): DetailTarget | null {
+    const definition = metricDefinitions.find((item) => item.key === metricKey);
+    const card = metricCards.find((item) => item.key === metricKey);
+    if (!definition || !card) {
+      return null;
+    }
+    return {
+      id: `metric-${definition.key}`,
+      type: 'metric',
+      title: definition.label,
+      subtitle: `指标口径 · ${definition.shortLabel}`,
+      description: definition.description,
+      tone: definition.tone,
+      badge: '指标说明',
+      note: `当前系统中该指标的计算口径为：${definition.formula}。结合主舞台的热力图和掩码图一起看，会更容易判断这个数字是否合理。`,
+      fields: [
+        { label: '当前值', value: card.value, tone: definition.tone },
+        { label: '解释重点', value: card.hint },
+        { label: '当前提示', value: card.footnote },
+        { label: '计算口径', value: definition.formula },
+      ],
+    };
+  }
+
+  function buildFrameDetailTarget(frame: AnalysisFrame): DetailTarget {
+    return {
+      id: `frame-${frame.id}`,
+      type: 'frame',
+      title: `关键帧 ${frame.frame_index}`,
+      subtitle: `${frame.frame_timestamp_seconds.toFixed(1)}s · hover 预览`,
+      description: '这张关键帧是当前视频或实时流任务中的采样结果，可用于比对杂草热力分布与分割边界。',
+      tone: 'info',
+      badge: '关键帧',
+      imagePath: toAbsoluteAssetUrl(compareMode === 'heatmap' ? frame.heatmap_image_path : frame.mask_image_path),
+      note: '点击关键帧后，主舞台会锁定这张图像，右侧详情也会保持对应统计，方便逐帧对照查看。',
+      fields: [
+        { label: '覆盖率', value: formatPercent(frame.weed_coverage_ratio), tone: 'success' },
+        { label: '植株估算', value: `${frame.estimated_plant_count}`, tone: 'warning' },
+        { label: '置信度', value: `${(frame.average_confidence * 100).toFixed(1)}%`, tone: 'info' },
+        { label: '采样时间', value: `${frame.frame_timestamp_seconds.toFixed(1)} s` },
+      ],
+    };
+  }
+
+  function buildJobDetailTarget(job: AnalysisJob, mode: 'history' | 'trend' = 'history'): DetailTarget {
+    const matchedSummaryImage = selectedJob?.job.id === job.id
+      ? compareImagePath || sourceImagePath
+      : dashboard?.latest_analysis?.job_id === job.id
+        ? toAbsoluteAssetUrl(dashboard.latest_analysis.heatmap_image_path)
+        : undefined;
+
+    return {
+      id: `${mode}-${job.id}`,
+      type: mode === 'trend' ? 'trend' : 'job',
+      title: `${sourceLabel(job.source_type)}任务 #${job.id}`,
+      subtitle: `${statusLabel(job.status)} · ${mode === 'trend' ? '趋势点联动' : '历史任务'}`,
+      description: '这里汇总了该任务的来源、结果表现和历史上下文，便于你快速回看过去的分析结论。',
+      tone: statusTone(job.status),
+      badge: mode === 'trend' ? '趋势详情' : '历史详情',
+      imagePath: matchedSummaryImage || undefined,
+      note: '点击历史卡片或趋势点后，可以跳回分析工作台继续查看图像结果和关键帧。',
+      fields: [
+        { label: '来源类型', value: sourceLabel(job.source_type) },
+        { label: '覆盖率', value: formatPercent(job.average_coverage_ratio || 0), tone: 'success' },
+        { label: '植株估算', value: `${job.estimated_plant_count}`, tone: 'warning' },
+        { label: '平均置信度', value: `${(job.average_confidence * 100).toFixed(1)}%`, tone: 'info' },
+      ],
+    };
+  }
+
+  const compositionDetail = useMemo<DetailTarget>(() => ({
+    id: 'composition',
+    type: 'summary',
+    title: '当前结果构成',
+    subtitle: '覆盖率 / 置信度 / 进度',
+    description: '这组条形构成卡把当前结果拆成几个最常用的判断维度，让你不用来回切换也能看懂当前任务是否值得继续追踪。',
+    tone: 'info',
+    badge: '结果解读',
+    note: '如果覆盖率高、置信度稳定、进度持续推进，通常说明当前任务的分割结果具备进一步分析价值。',
+    fields: [
+      { label: '覆盖率条', value: currentResult || selectedFrame ? formatPercent(selectedFrame?.weed_coverage_ratio ?? currentResult?.weed_coverage_ratio ?? 0) : '--', tone: 'success' },
+      { label: '置信度条', value: currentResult || selectedFrame ? `${((selectedFrame?.average_confidence ?? currentResult?.average_confidence ?? 0) * 100).toFixed(1)}%` : '--', tone: 'info' },
+      { label: '任务进度', value: selectedJob ? `${Math.round(selectedJob.job.progress * 100)}%` : '--', tone: 'warning' },
+      { label: '任务状态', value: selectedJob ? statusLabel(selectedJob.job.status) : '待启动' },
+    ],
+  }), [currentResult, selectedFrame, selectedJob]);
+
+  const analysisDefaultDetailTarget = useMemo(buildDefaultDetailTarget, [compareImagePath, currentResult, dashboard, isBackendOnline, selectedFrame, selectedJob, sourceImagePath]);
+  const analysisActiveDetailTarget = lockedDetailTarget ?? hoveredDetailTarget ?? analysisDefaultDetailTarget;
+
+  const historyDefaultDetailTarget = useMemo<DetailTarget>(() => {
+    if (selectedJob) {
+      return buildJobDetailTarget(selectedJob.job);
+    }
+    if (historyJobs.length > 0) {
+      return buildJobDetailTarget(historyJobs[0]);
+    }
+    return {
+      id: 'history-empty',
+      type: 'summary',
+      title: '暂无历史结果',
+      subtitle: '等待任务沉淀',
+      description: '历史分析页用于筛选、对比和回看过去的任务结果。当系统积累了更多图片、视频和实时流任务后，这里会更有价值。',
+      tone: 'muted',
+      badge: '历史页',
+      note: '你可以先去分析工作台上传图片或视频，结果会自动出现在历史分析页。',
+      fields: [
+        { label: '历史任务', value: '0' },
+        { label: '趋势点', value: '0' },
+        { label: '分析入口', value: '分析工作台' },
+        { label: '当前状态', value: '等待任务' },
+      ],
+    };
+  }, [historyJobs, selectedJob]);
+  const historyActiveDetailTarget = lockedDetailTarget ?? hoveredDetailTarget ?? historyDefaultDetailTarget;
+
+  const compositionItems = useMemo(() => {
+    const coverage = selectedFrame?.weed_coverage_ratio ?? currentResult?.weed_coverage_ratio ?? 0;
+    const confidence = selectedFrame?.average_confidence ?? currentResult?.average_confidence ?? 0;
+    const progress = selectedJob?.job.progress ?? 0;
+    return [
+      { label: '覆盖率条', value: currentResult || selectedFrame ? formatPercent(coverage) : '--', meter: toneMeter(coverage), tone: 'success' },
+      { label: '置信度条', value: currentResult || selectedFrame ? `${(confidence * 100).toFixed(1)}%` : '--', meter: toneMeter(confidence), tone: 'info' },
+      { label: '任务进度', value: selectedJob ? `${Math.round(progress * 100)}%` : '--', meter: toneMeter(progress), tone: 'warning' },
+    ];
+  }, [currentResult, selectedFrame, selectedJob]);
+
+  const modelSummary = useMemo(() => ([
+    { label: '当前后端', value: apiBaseUrl },
+    { label: '模型后端', value: selectedJob?.job.model_backend ?? '等待任务接入' },
+    { label: '模型状态', value: isBackendOnline ? '可用' : '离线' },
+    { label: '估算口径', value: '连通域估算植株数' },
+  ]), [isBackendOnline, selectedJob?.job.model_backend]);
+
+  const systemSummary = useMemo(() => ([
+    { label: '总检测数', value: `${dashboard?.detection.total_count ?? '--'}` },
+    { label: '当前分钟', value: `${dashboard?.detection.current_minute_count ?? '--'}` },
+    { label: '风险指数', value: dashboard ? formatNumber(dashboard.detection.risk_index, 1) : '--' },
+    { label: '最近分析', value: dashboard?.latest_analysis ? `任务 #${dashboard.latest_analysis.job_id}` : '暂无' },
+  ]), [dashboard]);
+
+  const latestAnalysisTarget = useMemo<DetailTarget>(() => {
+    if (dashboard?.latest_analysis) {
+      return {
+        id: `latest-${dashboard.latest_analysis.job_id}`,
+        type: 'summary',
+        title: `最近分析任务 #${dashboard.latest_analysis.job_id}`,
+        subtitle: `${sourceLabel(dashboard.latest_analysis.source_type)} · ${statusLabel(dashboard.latest_analysis.status)}`,
+        description: '首页只展示最近一次分析摘要，点击功能入口后再进入更完整的图像对比或历史回看页面。',
+        tone: statusTone(dashboard.latest_analysis.status),
+        badge: '最近分析',
+        imagePath: dashboard.latest_analysis.heatmap_image_path ? toAbsoluteAssetUrl(dashboard.latest_analysis.heatmap_image_path) : undefined,
+        fields: [
+          { label: '覆盖率', value: dashboard.latest_analysis.coverage_ratio !== undefined ? formatPercent(dashboard.latest_analysis.coverage_ratio) : '--', tone: 'success' },
+          { label: '植株估算', value: dashboard.latest_analysis.estimated_plant_count !== undefined ? `${dashboard.latest_analysis.estimated_plant_count}` : '--', tone: 'warning' },
+          { label: '结果时间', value: dashboard.latest_analysis.result_time ? formatDateTime(dashboard.latest_analysis.result_time) : '--' },
+          { label: '任务状态', value: statusLabel(dashboard.latest_analysis.status), tone: statusTone(dashboard.latest_analysis.status) },
+        ],
+        note: '首页只做概览。真正的图像对比、关键帧浏览和趋势联动，请分别进入分析工作台或历史分析页。',
+      };
+    }
+    return analysisDefaultDetailTarget;
+  }, [analysisDefaultDetailTarget, dashboard]);
+
+  const overviewCards = useMemo<HomeOverviewCard[]>(() => ([
+    {
+      id: 'health',
+      title: '系统在线状态',
+      subtitle: dashboard?.system.health ?? '等待状态',
+      description: '汇总当前后端、流媒体和模型运行状态，适合作为首页第一眼判断。',
+      value: isBackendOnline ? '在线' : '离线',
+      tone: isBackendOnline ? 'success' : 'danger',
+    },
+    {
+      id: 'latest',
+      title: '最近一次分析',
+      subtitle: dashboard?.latest_analysis ? `${sourceLabel(dashboard.latest_analysis.source_type)}任务` : '暂无结果',
+      description: '展示最近分析的任务类型与状态，帮助你决定是继续查看工作台还是先回看历史。',
+      value: dashboard?.latest_analysis ? `#${dashboard.latest_analysis.job_id}` : '--',
+      tone: dashboard?.latest_analysis ? statusTone(dashboard.latest_analysis.status) : 'muted',
+    },
+    {
+      id: 'video',
+      title: '实时流状态',
+      subtitle: `${dashboard?.video.rtmp_status ?? '--'} / ${dashboard?.video.hls_status ?? '--'}`,
+      description: '集中展示 RTMP、HLS、FPS 和延迟，适合快速判断实时链路是否稳定。',
+      value: dashboard ? `${dashboard.video.fps.toFixed(1)} FPS` : '--',
+      tone: 'info',
+    },
+    {
+      id: 'risk',
+      title: '风险指数',
+      subtitle: '检测态势',
+      description: '结合检测总数与当前分钟统计，作为首页上的总体态势提示。',
+      value: dashboard ? formatNumber(dashboard.detection.risk_index, 1) : '--',
+      tone: 'warning',
+    },
+  ]), [dashboard, isBackendOnline]);
+
+  const entryCards = useMemo<HomeOverviewCard[]>(() => ([
+    {
+      id: 'entry-analysis',
+      title: '进入分析工作台',
+      subtitle: '上传与图像对照',
+      description: '在双栏图像舞台中查看原图、热力图和掩码图，适合处理当前任务。',
+      value: selectedJob ? `当前任务 #${selectedJob.job.id}` : '开始分析',
+      tone: 'success',
+      route: 'analysis',
+    },
+    {
+      id: 'entry-history',
+      title: '查看历史分析',
+      subtitle: '趋势与回看',
+      description: '进入历史分析页筛选任务、查看趋势，并回跳到分析工作台继续看图。',
+      value: historyJobs.length > 0 ? `${historyJobs.length} 条记录` : '暂无历史',
+      tone: 'info',
+      route: 'history',
+    },
+    {
+      id: 'entry-system',
+      title: '查看实时系统状态',
+      subtitle: '首页总览',
+      description: '保留总览视角，快速确认系统状态、最近一次分析和风险指数。',
+      value: dashboard?.system.status ?? '总览',
+      tone: 'warning',
+      route: 'home',
+    },
+  ]), [dashboard?.system.status, historyJobs.length, selectedJob]);
+
+  async function refreshHistory(keepCurrentSelection = true) {
     try {
-      const response = await fetchJobList({ sourceType: selectedHistoryType, status: selectedHistoryStatus });
+      const response = await fetchJobList({
+        sourceType: historySelection.selectedHistoryType,
+        status: historySelection.selectedHistoryStatus,
+      });
       setHistoryJobs(response.items);
-      if (!selectedJob && response.items.length > 0) {
-        const detail = await fetchJobDetail(response.items[0].id);
+
+      const preferredJobId = keepCurrentSelection
+        ? (selectedJob?.job.id ?? response.items[0]?.id)
+        : selectedJob?.job.id;
+
+      if (preferredJobId) {
+        const detail = await fetchJobDetail(preferredJobId);
         setSelectedJob(detail);
+      } else if (response.items.length === 0) {
+        setSelectedJob(null);
       }
-    } catch (error) {
+    } catch {
       setMessage('历史记录读取失败，请检查后端分析服务。');
       setIsBackendOnline(false);
     }
   }
 
-  async function handleImageUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImageUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      return;
+    }
+    setImageFileName(file.name);
     setIsSubmitting(true);
-      setMessage(`正在分析图片：${file.name}，将输出杂草热力分割图与面积统计。`);
+    setMessage(`正在分析图片：${file.name}，将输出杂草热力分割图与面积统计。`);
     try {
       const response = await uploadImage(file);
       setSelectedJob({
@@ -253,8 +743,9 @@ export default function App() {
         latest_result: response.result,
         frames: [],
       });
-      setPreviewMode('heatmap');
-      setMessage('图片分析完成，杂草热力分割图与面积统计已更新。');
+      setCompareMode('heatmap');
+      setMessage('图片分析完成，已切换到分析工作台的双栏对比视图。');
+      navigate('/analysis');
       await refreshHistory();
     } catch {
       setMessage('图片分析失败，请检查文件格式或后端模型服务。');
@@ -265,15 +756,20 @@ export default function App() {
     }
   }
 
-  async function handleVideoUpload(event: React.ChangeEvent<HTMLInputElement>) {
+  async function handleVideoUpload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file) {
+      return;
+    }
+    setVideoFileName(file.name);
     setIsSubmitting(true);
-      setMessage(`视频任务已创建：${file.name}，正在抽帧进行杂草分割分析。`);
+    setMessage(`视频任务已创建：${file.name}，正在抽帧进行杂草分割分析。`);
     try {
       const response = await uploadVideo(file);
       setSelectedJob(response);
-      setPreviewMode('heatmap');
+      setCompareMode('heatmap');
+      setMessage('视频分析任务已创建，等待关键帧与热力结果更新。');
+      navigate('/analysis');
       await refreshHistory();
     } catch {
       setMessage('视频分析任务创建失败，请稍后重试。');
@@ -284,14 +780,30 @@ export default function App() {
     }
   }
 
+  async function handleDroppedFile(file: File, tab: 'image' | 'video') {
+    const mockEvent = {
+      target: {
+        files: [file],
+        value: '',
+      },
+    } as unknown as ChangeEvent<HTMLInputElement>;
+
+    if (tab === 'image') {
+      await handleImageUpload(mockEvent);
+      return;
+    }
+    await handleVideoUpload(mockEvent);
+  }
+
   async function handleCreateStream() {
     setIsSubmitting(true);
-      setMessage(`正在启动流分析：${streamUrl}，将持续输出杂草热力结果。`);
+    setMessage(`正在启动流分析：${streamUrl}，将持续输出杂草热力结果。`);
     try {
       const response = await createStreamJob(streamUrl);
       setSelectedJob(response);
-      setPreviewMode('heatmap');
-      setMessage('实时流任务已启动，正在接收最新杂草热力分割结果。');
+      setCompareMode('heatmap');
+      setMessage('实时流任务已启动，分析工作台会持续接收最新热力分割结果。');
+      navigate('/analysis');
       await refreshHistory();
     } catch {
       setMessage('流分析任务启动失败，请确认流地址可访问。');
@@ -302,318 +814,219 @@ export default function App() {
   }
 
   async function handleStopCurrentJob() {
-    if (!selectedJob) return;
-    await stopJob(selectedJob.job.id);
-    setMessage(`已请求停止任务 #${selectedJob.job.id}。`);
+    if (!selectedJob) {
+      return;
+    }
+    try {
+      await stopJob(selectedJob.job.id);
+      setMessage(`已请求停止任务 #${selectedJob.job.id}。`);
+      await refreshHistory();
+    } catch {
+      setMessage(`停止任务 #${selectedJob.job.id} 失败，请稍后重试。`);
+    }
   }
 
-  async function openHistoryJob(jobId: number) {
-    const detail = await fetchJobDetail(jobId);
-    setSelectedJob(detail);
-    setPreviewMode(detail.job.source_type === 'image' ? 'heatmap' : previewMode);
+  async function openHistoryJob(jobId: number, navigateToAnalysis = false) {
+    try {
+      const detail = await fetchJobDetail(jobId);
+      setSelectedJob(detail);
+      setCompareMode('heatmap');
+      if (navigateToAnalysis) {
+        navigate(`/analysis?jobId=${jobId}`);
+      }
+      setMessage(`已打开任务 #${jobId}，可继续查看图像结果或历史趋势。`);
+    } catch {
+      setMessage(`任务 #${jobId} 打开失败，请稍后重试。`);
+    }
   }
 
-  const metricCards = [
-    {
-      label: '杂草覆盖面积占比',
-      value: currentFrame ? formatPercent(currentFrame.weed_coverage_ratio) : currentResult ? formatPercent(currentResult.weed_coverage_ratio) : '--',
-      tone: 'success',
-    },
-    {
-      label: '杂草像素面积',
-      value: currentFrame ? `${currentFrame.weed_pixel_area}` : currentResult ? `${currentResult.weed_pixel_area}` : '--',
-      tone: 'info',
-    },
-    {
-      label: '估算杂草植株数',
-      value: currentFrame ? `${currentFrame.estimated_plant_count}` : currentResult ? `${currentResult.estimated_plant_count}` : '--',
-      tone: 'warning',
-    },
-    {
-      label: '分析耗时',
-      value: currentResult ? `${currentResult.processing_time_ms} ms` : '--',
-      tone: 'neutral',
-    },
-    {
-      label: selectedJob?.job.source_type === 'image' ? '样本数' : '处理帧数',
-      value: selectedJob ? `${selectedJob.job.frame_count || (selectedJob.job.source_type === 'image' ? 1 : 0)}` : '--',
-      tone: 'neutral',
-    },
-    {
-      label: '结果时间',
-      value: currentResult ? formatDateTime(currentResult.result_time) : '--',
-      tone: 'neutral',
-    },
-  ];
+  function handleMetricHover(metricKey: string | null) {
+    setHoveredDetailTarget(metricKey ? buildMetricDetailTarget(metricKey) : null);
+  }
+
+  function handleMetricClick(metricKey: string) {
+    const detail = buildMetricDetailTarget(metricKey);
+    if (detail) {
+      setLockedDetailTarget(detail);
+    }
+  }
+
+  function handleFrameHover(frameId: number | null) {
+    if (!frameId || !selectedJob) {
+      setHoveredDetailTarget(null);
+      return;
+    }
+    const frame = selectedJob.frames.find((item) => item.id === frameId);
+    setHoveredDetailTarget(frame ? buildFrameDetailTarget(frame) : null);
+  }
+
+  function handleFrameClick(frameId: number) {
+    if (!selectedJob) {
+      return;
+    }
+    setSelectedFrameId(frameId);
+    const frame = selectedJob.frames.find((item) => item.id === frameId);
+    if (frame) {
+      setLockedDetailTarget(buildFrameDetailTarget(frame));
+    }
+  }
+
+  function handleJobHover(jobId: number | null) {
+    if (!jobId) {
+      setHoveredDetailTarget(null);
+      return;
+    }
+    const job = historyJobs.find((item) => item.id === jobId);
+    setHoveredDetailTarget(job ? buildJobDetailTarget(job) : null);
+  }
+
+  function handleJobLock(jobId: number) {
+    const job = historyJobs.find((item) => item.id === jobId);
+    if (job) {
+      setLockedDetailTarget(buildJobDetailTarget(job));
+    }
+  }
+
+  function handleTrendHover(index: number | null) {
+    if (index === null || index < 0 || index >= trendJobs.length) {
+      setHoveredDetailTarget(null);
+      return;
+    }
+    const job = trendJobs[index];
+    setHoveredDetailTarget(buildJobDetailTarget(job, 'trend'));
+  }
+
+  function handleTrendClick(index: number | null) {
+    if (index === null || index < 0 || index >= trendJobs.length) {
+      return;
+    }
+    const job = trendJobs[index];
+    setLockedDetailTarget(buildJobDetailTarget(job, 'trend'));
+    void openHistoryJob(job.id);
+  }
+
+  function handleZoomIn() {
+    setZoomLevel((current) => clamp(current + 0.12, 1, 2.2));
+  }
+
+  function handleZoomOut() {
+    setZoomLevel((current) => clamp(current - 0.12, 0.8, 2.2));
+  }
+
+  function handleResetView() {
+    setZoomLevel(1);
+    setFitMode('contain');
+    setShowOverlay(true);
+    setOverlayOpacity(0.78);
+  }
+
+  function navigateToRoute(route: AppRoute) {
+    if (route === 'analysis') {
+      navigate(selectedJob ? `/analysis?jobId=${selectedJob.job.id}` : '/analysis');
+      return;
+    }
+    if (route === 'history') {
+      navigate('/history');
+      return;
+    }
+    navigate('/');
+  }
 
   return (
-    <div className="dashboard-shell">
-      <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-title-row">
-            <span className={`status-dot ${isBackendOnline ? 'online' : 'offline'}`} />
-            <div>
-              <h1>大田无人机巡检监控系统</h1>
-              <p>Web 分析大屏 · 图像展示 · 模型部署 · 热力分割结果</p>
-            </div>
-          </div>
-          <div className="status-banner">{message}</div>
-        </div>
-
-        <div className="topbar-center">
-          <div className="clock">{dashboard ? formatDateTime(dashboard.system.server_time) : '--'}</div>
-          <div className="clock-subtitle">{dashboard?.system.status ?? '等待系统状态'}</div>
-        </div>
-
-        <div className="topbar-metrics">
-          <div className="status-pill">
-            <span>RTMP</span>
-            <strong>{dashboard?.video.rtmp_status ?? '--'}</strong>
-          </div>
-          <div className="status-pill">
-            <span>HLS</span>
-            <strong>{dashboard?.video.hls_status ?? '--'}</strong>
-          </div>
-          <div className="status-pill">
-            <span>FPS</span>
-            <strong>{dashboard?.video.fps?.toFixed(1) ?? '--'}</strong>
-          </div>
-          <div className="status-pill">
-            <span>延迟</span>
-            <strong>{dashboard ? `${dashboard.video.latency_ms} ms` : '--'}</strong>
-          </div>
-        </div>
-      </header>
-
-      <main className="workspace-grid">
-        <section className="panel input-panel">
-          <div className="panel-header">
-            <h2>输入与任务控制</h2>
-            <span>图片 / 视频 / 实时流</span>
-          </div>
-
-          <div className="segmented-tabs">
-            {(['image', 'video', 'stream'] as InputTab[]).map((tab) => (
-              <button
-                key={tab}
-                className={activeTab === tab ? 'active' : ''}
-                onClick={() => setActiveTab(tab)}
-                type="button"
-              >
-                {tab === 'image' ? '图片分析' : tab === 'video' ? '视频分析' : '实时流分析'}
-              </button>
-            ))}
-          </div>
-
-          <div className="input-card">
-            {activeTab === 'image' && (
-              <>
-                <p>上传单张田间图像，返回杂草概率热力图、二值掩码和覆盖面积统计。</p>
-                <label className="upload-button">
-                  选择图片
-                  <input accept="image/*" hidden type="file" onChange={handleImageUpload} />
-                </label>
-              </>
-            )}
-
-            {activeTab === 'video' && (
-              <>
-                <p>上传巡检视频，系统将按采样帧率抽帧做杂草分割分析并保存历史记录。</p>
-                <label className="upload-button">
-                  选择视频
-                  <input accept="video/*" hidden type="file" onChange={handleVideoUpload} />
-                </label>
-              </>
-            )}
-
-            {activeTab === 'stream' && (
-              <>
-                <p>支持 RTSP / RTMP / HLS 地址，也支持默认的演示流地址。</p>
-                <input
-                  className="text-input"
-                  value={streamUrl}
-                  onChange={(event) => setStreamUrl(event.target.value)}
-                  placeholder="请输入流地址，例如 rtsp:// 或 demo://field-inspection"
-                />
-                <button className="primary-button" type="button" onClick={handleCreateStream}>
-                  启动流分析
-                </button>
-              </>
-            )}
-          </div>
-
-          <div className="input-card">
-            <div className="card-title-row">
-              <h3>当前任务摘要</h3>
-              {selectedJob && <span className={`tag ${statusTone(selectedJob.job.status)}`}>{selectedJob.job.status}</span>}
-            </div>
-            {selectedJob ? (
-              <dl className="detail-list">
-                <div><dt>任务编号</dt><dd>#{selectedJob.job.id}</dd></div>
-                <div><dt>来源类型</dt><dd>{sourceLabel(selectedJob.job.source_type)}</dd></div>
-                <div><dt>模型后端</dt><dd>{selectedJob.job.model_backend}</dd></div>
-                <div><dt>处理进度</dt><dd>{(selectedJob.job.progress * 100).toFixed(0)}%</dd></div>
-              </dl>
-            ) : (
-              <p className="muted">暂无分析任务，先上传图片或视频即可。</p>
-            )}
-
-            <div className="action-row">
-              <button type="button" className="secondary-button" onClick={() => void refreshHistory()}>
-                刷新历史
-              </button>
-              <button
-                type="button"
-                className="ghost-danger-button"
-                onClick={handleStopCurrentJob}
-                disabled={!selectedJob || (selectedJob.job.status !== 'running' && selectedJob.job.status !== 'pending')}
-              >
-                停止任务
-              </button>
-            </div>
-          </div>
-        </section>
-
-        <section className="panel preview-panel">
-          <div className="panel-header">
-            <h2>杂草分割展示</h2>
-            <span>{selectedJob ? `${sourceLabel(selectedJob.job.source_type)} · ${selectedJob.job.source_name}` : '等待分析结果'}</span>
-          </div>
-
-          <div className="segmented-tabs compact">
-            {(['source', 'heatmap', 'mask'] as PreviewMode[]).map((mode) => (
-              <button
-                key={mode}
-                className={previewMode === mode ? 'active' : ''}
-                onClick={() => setPreviewMode(mode)}
-                type="button"
-              >
-                {mode === 'source' ? '原图/原帧' : mode === 'heatmap' ? '杂草热力图' : '杂草掩码图'}
-              </button>
-            ))}
-          </div>
-
-          <div className="media-stage">
-            {shouldRenderVideo ? (
-              <video src={toAbsoluteAssetUrl(selectedJob?.job.source_media_path)} controls muted playsInline />
-            ) : imageSourcePath ? (
-              <img src={imageSourcePath} alt="分析结果展示" />
-            ) : (
-              <div className="empty-stage">
-                <strong>等待结果生成</strong>
-                <span>上传图片、视频或启动流分析后，这里会展示原始画面与杂草分割结果。</span>
-              </div>
-            )}
-          </div>
-
-          <div className="legend-row">
-            <span>杂草概率热度</span>
-            <div className="heatmap-legend" />
-            <span>低</span>
-            <span>高</span>
-          </div>
-
-          <div className="thumbnail-strip">
-            {selectedJob?.frames.map((frame) => (
-              <button key={frame.id} type="button" className="thumbnail-card" onClick={() => setPreviewMode('heatmap')}>
-                <img src={toAbsoluteAssetUrl(frame.heatmap_image_path)} alt={`关键帧 ${frame.frame_index}`} />
-                <span>{frame.frame_timestamp_seconds.toFixed(1)}s</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel insight-panel">
-          <div className="panel-header">
-            <h2>统计与模型状态</h2>
-            <span>{dashboard?.latest_analysis ? '已接入最近一次分析摘要' : '等待分析摘要'}</span>
-          </div>
-
-          <div className="metric-grid">
-            {metricCards.map((card) => (
-              <article key={card.label} className={`metric-card ${card.tone}`}>
-                <span>{card.label}</span>
-                <strong>{card.value}</strong>
-              </article>
-            ))}
-          </div>
-
-          <div className="info-card">
-            <div className="card-title-row">
-              <h3>模型部署状态</h3>
-              <span className="tag success">{selectedJob?.job.model_backend ?? 'mock'}</span>
-            </div>
-            <dl className="detail-list">
-              <div><dt>当前后端</dt><dd>{apiBaseUrl}</dd></div>
-              <div><dt>模型状态</dt><dd>{isBackendOnline ? '可用' : '离线'}</dd></div>
-              <div><dt>结果说明</dt><dd>{currentResult?.summary_note ?? '等待推理结果'}</dd></div>
-              <div><dt>估算口径</dt><dd>连通域估算植株数</dd></div>
-            </dl>
-          </div>
-
-          <div className="info-card">
-            <div className="card-title-row">
-              <h3>系统态势</h3>
-              <span className="tag info">{dashboard?.system.health ?? '--'}</span>
-            </div>
-            <dl className="detail-list">
-              <div><dt>总检测数</dt><dd>{dashboard?.detection.total_count ?? '--'}</dd></div>
-              <div><dt>当前分钟</dt><dd>{dashboard?.detection.current_minute_count ?? '--'}</dd></div>
-              <div><dt>风险指数</dt><dd>{dashboard?.detection.risk_index?.toFixed(1) ?? '--'}</dd></div>
-              <div><dt>最近分析</dt><dd>{dashboard?.latest_analysis ? `任务 #${dashboard.latest_analysis.job_id}` : '暂无'}</dd></div>
-            </dl>
-          </div>
-        </section>
-      </main>
-
-      <section className="panel history-panel">
-        <div className="panel-header">
-          <h2>历史结果与趋势分析</h2>
-          <div className="history-filters">
-            <select value={selectedHistoryType} onChange={(event) => setSelectedHistoryType(event.target.value)}>
-              <option value="">全部来源</option>
-              <option value="image">图片</option>
-              <option value="video">视频</option>
-              <option value="stream">实时流</option>
-            </select>
-            <select value={selectedHistoryStatus} onChange={(event) => setSelectedHistoryStatus(event.target.value)}>
-              <option value="">全部状态</option>
-              <option value="completed">已完成</option>
-              <option value="running">运行中</option>
-              <option value="failed">失败</option>
-              <option value="stopped">已停止</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="history-layout">
-          <div className="history-list">
-            {historyJobs.map((job) => (
-              <button
-                key={job.id}
-                type="button"
-                className={`history-item ${selectedJob?.job.id === job.id ? 'active' : ''}`}
-                onClick={() => void openHistoryJob(job.id)}
-              >
-                <div className="history-item-head">
-                  <strong>#{job.id} · {sourceLabel(job.source_type)}</strong>
-                  <span className={`tag ${statusTone(job.status)}`}>{job.status}</span>
-                </div>
-                <span className="history-name">{job.source_name}</span>
-                <div className="history-item-meta">
-                  <span>覆盖率 {formatPercent(job.average_coverage_ratio || 0)}</span>
-                  <span>植株估算 {job.estimated_plant_count}</span>
-                  <span>{formatDateTime(job.created_at)}</span>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          <div className="trend-panel">
-            <ReactECharts option={trendOption} style={{ height: '100%', width: '100%' }} />
-          </div>
-        </div>
-      </section>
+    <AppShell dashboard={dashboard} isBackendOnline={isBackendOnline} message={message}>
+      <Routes>
+        <Route
+          path="/"
+          element={(
+            <HomePage
+              dashboard={dashboard}
+              latestDetailTarget={latestAnalysisTarget}
+              overviewCards={overviewCards}
+              entryCards={entryCards}
+              onEntryClick={navigateToRoute}
+            />
+          )}
+        />
+        <Route
+          path="/analysis"
+          element={(
+            <AnalysisPage
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              selectedJob={selectedJob}
+              imageFileName={imageFileName}
+              videoFileName={videoFileName}
+              streamUrl={streamUrl}
+              setStreamUrl={setStreamUrl}
+              onImageUpload={handleImageUpload}
+              onVideoUpload={handleVideoUpload}
+              onDroppedFile={handleDroppedFile}
+              onCreateStream={handleCreateStream}
+              onRefreshHistory={() => void refreshHistory()}
+              onStopCurrentJob={() => void handleStopCurrentJob()}
+              sourceType={selectedJob?.job.source_type ?? null}
+              sourceName={selectedJob?.job.source_name ?? '未选择任务'}
+              sourceLabelText={selectedJob ? sourceLabel(selectedJob.job.source_type) : '等待结果'}
+              compareMode={compareMode}
+              setCompareMode={setCompareMode}
+              sourceImagePath={sourceImagePath}
+              compareImagePath={compareImagePath}
+              sourceVideoPath={sourceVideoPath}
+              shouldRenderSourceVideo={Boolean(shouldRenderSourceVideo)}
+              showOverlay={showOverlay}
+              overlayOpacity={overlayOpacity}
+              fitMode={fitMode}
+              zoomLevel={zoomLevel}
+              onZoomIn={handleZoomIn}
+              onZoomOut={handleZoomOut}
+              onToggleOverlay={() => setShowOverlay((current) => !current)}
+              onToggleFitMode={() => setFitMode((current) => current === 'contain' ? 'cover' : 'contain')}
+              onResetView={handleResetView}
+              onOverlayOpacityChange={setOverlayOpacity}
+              thumbnails={framePreviewStates}
+              onFrameHover={handleFrameHover}
+              onFrameClick={handleFrameClick}
+              onStageDetailHover={setHoveredDetailTarget}
+              stageDetailTarget={analysisDefaultDetailTarget}
+              activeDetailTarget={analysisActiveDetailTarget}
+              isDetailLocked={Boolean(lockedDetailTarget)}
+              onUnlockDetail={() => setLockedDetailTarget(null)}
+              metricCards={metricCards}
+              compositionItems={compositionItems}
+              modelSummary={modelSummary}
+              systemSummary={systemSummary}
+              onMetricHover={handleMetricHover}
+              onMetricClick={handleMetricClick}
+              onCompositionHover={setHoveredDetailTarget}
+              compositionDetail={compositionDetail}
+            />
+          )}
+        />
+        <Route
+          path="/history"
+          element={(
+            <HistoryPage
+              historyJobs={historyJobs}
+              selectedJobId={selectedJob?.job.id ?? null}
+              selectedHistoryType={historySelection.selectedHistoryType}
+              selectedHistoryStatus={historySelection.selectedHistoryStatus}
+              onSelectHistoryType={(value) => setHistorySelection((current) => ({ ...current, selectedHistoryType: value }))}
+              onSelectHistoryStatus={(value) => setHistorySelection((current) => ({ ...current, selectedHistoryStatus: value }))}
+              onOpenJob={(jobId) => void openHistoryJob(jobId)}
+              onJobHover={handleJobHover}
+              onJobLock={handleJobLock}
+              historyDetailTarget={historyActiveDetailTarget}
+              isDetailLocked={Boolean(lockedDetailTarget)}
+              onUnlockDetail={() => setLockedDetailTarget(null)}
+              trendOption={trendOption}
+              onPointHover={handleTrendHover}
+              onPointClick={handleTrendClick}
+              analysisLinkJobId={selectedJob?.job.id ?? null}
+            />
+          )}
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
 
       {isSubmitting && (
         <div className="loading-mask">
@@ -623,6 +1036,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }

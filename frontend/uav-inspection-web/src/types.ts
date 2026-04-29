@@ -1,6 +1,9 @@
 export type SourceType = 'image' | 'video' | 'stream';
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
 export type PreviewMode = 'source' | 'heatmap' | 'mask';
+export type Tone = 'success' | 'info' | 'warning' | 'danger' | 'muted' | 'neutral';
+export type DetailTargetType = 'summary' | 'metric' | 'frame' | 'job' | 'trend';
+export type AppRoute = 'home' | 'analysis' | 'history';
 
 export interface SystemStatus {
   system_name: string;
@@ -130,4 +133,73 @@ export interface AnalysisRealtimePayload {
   job: AnalysisJob;
   latest_result: AnalysisResult | null;
   latest_frame: AnalysisFrame | null;
+}
+
+export interface DetailField {
+  label: string;
+  value: string;
+  tone?: Tone;
+}
+
+export interface DetailTarget {
+  id: string;
+  type: DetailTargetType;
+  title: string;
+  subtitle: string;
+  description: string;
+  tone: Tone;
+  badge?: string;
+  note?: string;
+  imagePath?: string;
+  fields: DetailField[];
+}
+
+export interface MetricDefinition {
+  key: string;
+  label: string;
+  shortLabel: string;
+  description: string;
+  formula: string;
+  tone: Tone;
+}
+
+export interface MetricCardData {
+  key: string;
+  label: string;
+  value: string;
+  tone: Tone;
+  hint: string;
+  footnote: string;
+  meter: number;
+  trend: number[];
+}
+
+export interface FramePreviewState {
+  id: number;
+  title: string;
+  timestampLabel: string;
+  coverageLabel: string;
+  plantLabel: string;
+  confidenceLabel: string;
+  previewImagePath: string;
+  active: boolean;
+}
+
+export interface HomeOverviewCard {
+  id: string;
+  title: string;
+  subtitle: string;
+  description: string;
+  value: string;
+  tone: Tone;
+  route?: AppRoute;
+}
+
+export interface HistorySelectionState {
+  selectedHistoryType: string;
+  selectedHistoryStatus: string;
+}
+
+export interface AnalysisPageQueryState {
+  jobId: number | null;
 }
