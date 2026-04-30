@@ -16,9 +16,17 @@ class Settings(BaseSettings):
     model_type: str = "deeplabv3plus_resnet34"
     model_path: str = ""
     model_device: str = "auto"
+    model_class_index_crop: int = 1
     model_class_index_weed: int = 2
     model_allow_mock_fallback: bool = True
     image_result_threshold: float = 0.52
+    weed_min_component_area: int = 20
+    weed_max_component_aspect_ratio: float = 5.5
+    weed_min_component_fill_ratio: float = 0.16
+    vegetation_excess_green_threshold: float = 0.08
+    vegetation_saturation_threshold: float = 0.16
+    morphology_open_kernel_size: int = 3
+    morphology_close_kernel_size: int = 5
     video_sample_fps: float = 1.5
     stream_sample_interval_seconds: float = 2.0
     max_concurrent_analysis_jobs: int = 2

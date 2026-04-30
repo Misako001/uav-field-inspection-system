@@ -70,7 +70,10 @@ async def save_upload_file(upload: UploadFile, relative_dir: str) -> Path:
 @dataclass
 class InferenceOutput:
     probability_map: np.ndarray
+    class_map: np.ndarray
     binary_mask: np.ndarray
+    crop_mask: np.ndarray
+    background_mask: np.ndarray
     confidence_summary: float
 
 
@@ -111,9 +114,23 @@ class MockWeedSegmentationRunner(BaseModelRunner):
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
+        vegetation_mask = (probability >= max(self.settings.image_result_threshold * 0.7, 0.24)).astype(np.uint8)
+        crop_mask = np.where((vegetation_mask > 0) & (mask == 0), 1, 0).astype(np.uint8)
+        background_mask = np.where(vegetation_mask > 0, 0, 1).astype(np.uint8)
+        class_map = np.zeros_like(mask, dtype=np.uint8)
+        class_map[crop_mask > 0] = self.settings.model_class_index_crop
+        class_map[mask > 0] = self.settings.model_class_index_weed
+
         active_probabilities = probability[mask > 0]
         confidence = float(active_probabilities.mean()) if active_probabilities.size else float(probability.mean() * 0.35)
-        return InferenceOutput(probability_map=probability, binary_mask=mask, confidence_summary=confidence)
+        return InferenceOutput(
+            probability_map=probability,
+            class_map=class_map,
+            binary_mask=mask,
+            crop_mask=crop_mask,
+            background_mask=background_mask,
+            confidence_summary=confidence,
+        )
 
 
 class CkptModelRunner(BaseModelRunner):
@@ -154,17 +171,19 @@ class CkptModelRunner(BaseModelRunner):
             class_map = probabilities.argmax(dim=1)
 
         probability_map = weed_probability.squeeze(0).detach().cpu().numpy().astype(np.float32)
-        class_map_np = class_map.squeeze(0).detach().cpu().numpy()
-        threshold = float(self.settings.image_result_threshold)
-        binary_mask = np.where((class_map_np == weed_index) | (probability_map >= threshold), 1, 0).astype(np.uint8)
+        class_map_np = class_map.squeeze(0).detach().cpu().numpy().astype(np.uint8)
+        refined = _refine_scene_masks(image_rgb, class_map_np, probability_map, self.settings)
 
-        kernel = np.ones((3, 3), dtype=np.uint8)
-        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_OPEN, kernel)
-        binary_mask = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
-
-        active_probabilities = probability_map[binary_mask > 0]
+        active_probabilities = probability_map[refined["weed_mask"] > 0]
         confidence = float(active_probabilities.mean()) if active_probabilities.size else float(probability_map.mean())
-        return InferenceOutput(probability_map=probability_map, binary_mask=binary_mask, confidence_summary=confidence)
+        return InferenceOutput(
+            probability_map=probability_map,
+            class_map=refined["class_map"],
+            binary_mask=refined["weed_mask"],
+            crop_mask=refined["crop_mask"],
+            background_mask=refined["background_mask"],
+            confidence_summary=confidence,
+        )
 
     def _pad_to_stride(self, tensor, *, stride: int):
         _, _, height, width = tensor.shape
@@ -282,6 +301,86 @@ def _write_mask_image(mask: np.ndarray, destination: Path) -> None:
     cv2.imwrite(str(destination), (mask.astype(np.uint8) * 255))
 
 
+def _kernel(size: int) -> np.ndarray:
+    size = max(1, int(size))
+    if size % 2 == 0:
+        size += 1
+    return np.ones((size, size), dtype=np.uint8)
+
+
+def _build_vegetation_mask(image_rgb: np.ndarray, settings: Settings) -> np.ndarray:
+    image = image_rgb.astype(np.float32) / 255.0
+    r = image[:, :, 0]
+    g = image[:, :, 1]
+    b = image[:, :, 2]
+    hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
+    hue = hsv[:, :, 0]
+    saturation = hsv[:, :, 1] / 255.0
+
+    excess_green = np.clip((2.0 * g) - r - b, -1.0, 1.0)
+    green_hue = np.where((hue >= 28.0) & (hue <= 110.0), 1, 0)
+    vegetation = (
+        (excess_green >= settings.vegetation_excess_green_threshold)
+        & (saturation >= settings.vegetation_saturation_threshold)
+        & (green_hue > 0)
+    )
+    return vegetation.astype(np.uint8)
+
+
+def _refine_scene_masks(
+    image_rgb: np.ndarray,
+    class_map: np.ndarray,
+    probability_map: np.ndarray,
+    settings: Settings,
+) -> dict[str, np.ndarray]:
+    weed_index = settings.model_class_index_weed
+    crop_index = settings.model_class_index_crop
+    vegetation_mask = _build_vegetation_mask(image_rgb, settings)
+
+    weed_mask = np.where(
+        ((class_map == weed_index) | (probability_map >= float(settings.image_result_threshold)))
+        & (vegetation_mask > 0),
+        1,
+        0,
+    ).astype(np.uint8)
+
+    weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_OPEN, _kernel(settings.morphology_open_kernel_size))
+    weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_CLOSE, _kernel(settings.morphology_close_kernel_size))
+
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats((weed_mask * 255).astype(np.uint8))
+    filtered_weed = np.zeros_like(weed_mask, dtype=np.uint8)
+
+    for index in range(1, component_count):
+        area = int(stats[index, cv2.CC_STAT_AREA])
+        width = max(1, int(stats[index, cv2.CC_STAT_WIDTH]))
+        height = max(1, int(stats[index, cv2.CC_STAT_HEIGHT]))
+        aspect_ratio = max(width, height) / max(1.0, min(width, height))
+        fill_ratio = area / float(width * height)
+        component_mask = labels == index
+        component_probability = float(probability_map[component_mask].mean()) if np.any(component_mask) else 0.0
+
+        if area < settings.weed_min_component_area:
+            continue
+        if aspect_ratio > settings.weed_max_component_aspect_ratio and fill_ratio < settings.weed_min_component_fill_ratio:
+            continue
+        if component_probability < max(float(settings.image_result_threshold) * 0.82, 0.22):
+            continue
+        filtered_weed[component_mask] = 1
+
+    crop_mask = np.where((vegetation_mask > 0) & (filtered_weed == 0), 1, 0).astype(np.uint8)
+    background_mask = np.where(vegetation_mask > 0, 0, 1).astype(np.uint8)
+    refined_class_map = np.zeros_like(class_map, dtype=np.uint8)
+    refined_class_map[crop_mask > 0] = crop_index
+    refined_class_map[filtered_weed > 0] = weed_index
+
+    return {
+        "class_map": refined_class_map,
+        "weed_mask": filtered_weed,
+        "crop_mask": crop_mask,
+        "background_mask": background_mask,
+    }
+
+
 def _make_heatmap_overlay(image_rgb: np.ndarray, probability_map: np.ndarray, binary_mask: np.ndarray) -> np.ndarray:
     heat_input = np.clip(probability_map * 255.0, 0, 255).astype(np.uint8)
     heat_bgr = cv2.applyColorMap(heat_input, cv2.COLORMAP_JET)
@@ -292,13 +391,35 @@ def _make_heatmap_overlay(image_rgb: np.ndarray, probability_map: np.ndarray, bi
     return np.clip(overlay, 0, 255).astype(np.uint8)
 
 
-def _estimate_plant_count(binary_mask: np.ndarray) -> int:
+def _make_segmentation_image(class_map: np.ndarray, settings: Settings) -> np.ndarray:
+    crop_index = settings.model_class_index_crop
+    weed_index = settings.model_class_index_weed
+    image = np.zeros((*class_map.shape, 3), dtype=np.uint8)
+    image[class_map == 0] = np.array([36, 46, 58], dtype=np.uint8)
+    image[class_map == crop_index] = np.array([85, 214, 116], dtype=np.uint8)
+    image[class_map == weed_index] = np.array([255, 88, 104], dtype=np.uint8)
+    return image
+
+
+def _make_segmentation_overlay(image_rgb: np.ndarray, class_map: np.ndarray, settings: Settings) -> np.ndarray:
+    segmentation = _make_segmentation_image(class_map, settings)
+    overlay = cv2.addWeighted(image_rgb.astype(np.uint8), 0.56, segmentation.astype(np.uint8), 0.44, 0.0)
+
+    weed_mask = (class_map == settings.model_class_index_weed).astype(np.uint8)
+    crop_mask = (class_map == settings.model_class_index_crop).astype(np.uint8)
+    for mask, color in ((crop_mask, (102, 232, 128)), (weed_mask, (255, 92, 92))):
+        contours, _ = cv2.findContours((mask * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(overlay, contours, -1, color, 2)
+    return overlay
+
+
+def _estimate_component_count(binary_mask: np.ndarray, min_area: int) -> int:
     mask_uint8 = (binary_mask.astype(np.uint8) * 255)
     component_count, _, stats, _ = cv2.connectedComponentsWithStats(mask_uint8)
     valid = 0
     for index in range(1, component_count):
         area = stats[index, cv2.CC_STAT_AREA]
-        if area >= 36:
+        if area >= min_area:
             valid += 1
     return valid
 
@@ -309,9 +430,15 @@ class RenderArtifacts:
     source_path: str
     heatmap_path: str
     mask_path: str
+    segmentation_path: str
+    overlay_segmentation_path: str
     weed_coverage_ratio: float
+    weed_area_ratio: float
+    crop_area_ratio: float
+    background_area_ratio: float
     weed_pixel_area: int
     estimated_plant_count: int
+    weed_component_count: int
     average_confidence: float
     processing_time_ms: int
 
@@ -324,10 +451,16 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
     inference = runner.infer(image_rgb)
 
     weed_pixel_area = int(np.count_nonzero(inference.binary_mask))
-    total_pixels = int(inference.binary_mask.size)
+    crop_pixel_area = int(np.count_nonzero(inference.crop_mask))
+    background_pixel_area = int(np.count_nonzero(inference.background_mask))
+    total_pixels = int(inference.class_map.size)
     coverage_ratio = float(weed_pixel_area / total_pixels) if total_pixels else 0.0
-    plant_count = _estimate_plant_count(inference.binary_mask)
+    crop_area_ratio = float(crop_pixel_area / total_pixels) if total_pixels else 0.0
+    background_area_ratio = float(background_pixel_area / total_pixels) if total_pixels else 0.0
+    component_count = _estimate_component_count(inference.binary_mask, settings.weed_min_component_area)
     heatmap_rgb = _make_heatmap_overlay(image_rgb, inference.probability_map, inference.binary_mask)
+    segmentation_rgb = _make_segmentation_image(inference.class_map, settings)
+    segmentation_overlay_rgb = _make_segmentation_overlay(image_rgb, inference.class_map, settings)
     processing_time_ms = int((time.perf_counter() - started) * 1000)
 
     result_root = settings.storage_root_path / result_dir
@@ -337,10 +470,14 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
 
     source_path = result_root / f"{file_stem}_source.jpg"
     heatmap_path = result_root / f"{file_stem}_heatmap.jpg"
+    segmentation_path = result_root / f"{file_stem}_segmentation.jpg"
+    overlay_segmentation_path = result_root / f"{file_stem}_segmentation_overlay.jpg"
     mask_path = mask_root / f"{file_stem}_mask.png"
 
     _write_rgb_image(image_rgb, source_path)
     _write_rgb_image(heatmap_rgb, heatmap_path)
+    _write_rgb_image(segmentation_rgb, segmentation_path)
+    _write_rgb_image(segmentation_overlay_rgb, overlay_segmentation_path)
     _write_mask_image(inference.binary_mask, mask_path)
 
     return RenderArtifacts(
@@ -348,9 +485,15 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
         source_path=as_public_storage_path(source_path, settings),
         heatmap_path=as_public_storage_path(heatmap_path, settings),
         mask_path=as_public_storage_path(mask_path, settings),
+        segmentation_path=as_public_storage_path(segmentation_path, settings),
+        overlay_segmentation_path=as_public_storage_path(overlay_segmentation_path, settings),
         weed_coverage_ratio=coverage_ratio,
+        weed_area_ratio=coverage_ratio,
+        crop_area_ratio=crop_area_ratio,
+        background_area_ratio=background_area_ratio,
         weed_pixel_area=weed_pixel_area,
-        estimated_plant_count=plant_count,
+        estimated_plant_count=component_count,
+        weed_component_count=component_count,
         average_confidence=float(inference.confidence_summary),
         processing_time_ms=processing_time_ms,
     )
@@ -378,13 +521,19 @@ def run_image_analysis(db: Session, job: AnalysisJob, source_file_path: Path) ->
         source_image_path=artifacts.source_path,
         heatmap_image_path=artifacts.heatmap_path,
         mask_image_path=artifacts.mask_path,
-        thumbnail_path=artifacts.heatmap_path,
+        segmentation_image_path=artifacts.segmentation_path,
+        overlay_segmentation_path=artifacts.overlay_segmentation_path,
+        thumbnail_path=artifacts.overlay_segmentation_path,
         weed_coverage_ratio=artifacts.weed_coverage_ratio,
+        weed_area_ratio=artifacts.weed_area_ratio,
+        crop_area_ratio=artifacts.crop_area_ratio,
+        background_area_ratio=artifacts.background_area_ratio,
         weed_pixel_area=artifacts.weed_pixel_area,
         estimated_plant_count=artifacts.estimated_plant_count,
+        weed_component_count=artifacts.weed_component_count,
         average_confidence=artifacts.average_confidence,
         processing_time_ms=artifacts.processing_time_ms,
-        summary_note="图片分析完成，已生成热力分割图与面积统计。",
+        summary_note="图片分析完成，已生成热力图、彩色分割图和面积构成统计。",
     )
     db.add(result)
     db.flush()
@@ -503,10 +652,10 @@ def get_latest_analysis_summary(db: Session) -> dict[str, Any] | None:
         "job_id": latest_job.id,
         "source_type": latest_job.source_type,
         "status": latest_job.status,
-        "coverage_ratio": latest_result.weed_coverage_ratio,
+        "coverage_ratio": latest_result.weed_area_ratio or latest_result.weed_coverage_ratio,
         "estimated_plant_count": latest_result.estimated_plant_count,
         "result_time": latest_result.result_time,
-        "heatmap_image_path": latest_result.heatmap_image_path,
+        "heatmap_image_path": latest_result.overlay_segmentation_path or latest_result.heatmap_image_path,
     }
 
 
@@ -664,9 +813,15 @@ class AnalysisRealtimeHub:
                     source_frame_path=artifacts.source_path,
                     heatmap_image_path=artifacts.heatmap_path,
                     mask_image_path=artifacts.mask_path,
+                    segmentation_image_path=artifacts.segmentation_path,
+                    overlay_segmentation_path=artifacts.overlay_segmentation_path,
                     weed_coverage_ratio=artifacts.weed_coverage_ratio,
+                    weed_area_ratio=artifacts.weed_area_ratio,
+                    crop_area_ratio=artifacts.crop_area_ratio,
+                    background_area_ratio=artifacts.background_area_ratio,
                     weed_pixel_area=artifacts.weed_pixel_area,
                     estimated_plant_count=artifacts.estimated_plant_count,
+                    weed_component_count=artifacts.weed_component_count,
                     average_confidence=artifacts.average_confidence,
                 )
                 db.add(frame_record)
@@ -680,14 +835,20 @@ class AnalysisRealtimeHub:
                 latest_result.source_image_path = artifacts.source_path
                 latest_result.heatmap_image_path = artifacts.heatmap_path
                 latest_result.mask_image_path = artifacts.mask_path
-                latest_result.thumbnail_path = artifacts.heatmap_path
+                latest_result.segmentation_image_path = artifacts.segmentation_path
+                latest_result.overlay_segmentation_path = artifacts.overlay_segmentation_path
+                latest_result.thumbnail_path = artifacts.overlay_segmentation_path
                 latest_result.weed_coverage_ratio = artifacts.weed_coverage_ratio
+                latest_result.weed_area_ratio = artifacts.weed_area_ratio
+                latest_result.crop_area_ratio = artifacts.crop_area_ratio
+                latest_result.background_area_ratio = artifacts.background_area_ratio
                 latest_result.weed_pixel_area = artifacts.weed_pixel_area
                 latest_result.estimated_plant_count = artifacts.estimated_plant_count
+                latest_result.weed_component_count = artifacts.weed_component_count
                 latest_result.average_confidence = artifacts.average_confidence
                 latest_result.processing_time_ms = artifacts.processing_time_ms
                 latest_result.result_time = datetime.now(timezone.utc)
-                latest_result.summary_note = "视频抽帧分析进行中。"
+                latest_result.summary_note = "视频抽帧分析进行中，已生成热力图与彩色分割图。"
 
                 sampled_count += 1
                 coverage_sum += artifacts.weed_coverage_ratio
@@ -783,9 +944,15 @@ class AnalysisRealtimeHub:
                         source_frame_path=artifacts.source_path,
                         heatmap_image_path=artifacts.heatmap_path,
                         mask_image_path=artifacts.mask_path,
+                        segmentation_image_path=artifacts.segmentation_path,
+                        overlay_segmentation_path=artifacts.overlay_segmentation_path,
                         weed_coverage_ratio=artifacts.weed_coverage_ratio,
+                        weed_area_ratio=artifacts.weed_area_ratio,
+                        crop_area_ratio=artifacts.crop_area_ratio,
+                        background_area_ratio=artifacts.background_area_ratio,
                         weed_pixel_area=artifacts.weed_pixel_area,
                         estimated_plant_count=artifacts.estimated_plant_count,
+                        weed_component_count=artifacts.weed_component_count,
                         average_confidence=artifacts.average_confidence,
                     )
                     db.add(frame_record)
@@ -801,14 +968,20 @@ class AnalysisRealtimeHub:
                     latest_result.source_image_path = artifacts.source_path
                     latest_result.heatmap_image_path = artifacts.heatmap_path
                     latest_result.mask_image_path = artifacts.mask_path
-                    latest_result.thumbnail_path = artifacts.heatmap_path
+                    latest_result.segmentation_image_path = artifacts.segmentation_path
+                    latest_result.overlay_segmentation_path = artifacts.overlay_segmentation_path
+                    latest_result.thumbnail_path = artifacts.overlay_segmentation_path
                     latest_result.weed_coverage_ratio = artifacts.weed_coverage_ratio
+                    latest_result.weed_area_ratio = artifacts.weed_area_ratio
+                    latest_result.crop_area_ratio = artifacts.crop_area_ratio
+                    latest_result.background_area_ratio = artifacts.background_area_ratio
                     latest_result.weed_pixel_area = artifacts.weed_pixel_area
                     latest_result.estimated_plant_count = artifacts.estimated_plant_count
+                    latest_result.weed_component_count = artifacts.weed_component_count
                     latest_result.average_confidence = artifacts.average_confidence
                     latest_result.processing_time_ms = artifacts.processing_time_ms
                     latest_result.result_time = datetime.now(timezone.utc)
-                    latest_result.summary_note = "实时流采样分析进行中。"
+                    latest_result.summary_note = "实时流采样分析进行中，已生成热力图与彩色分割图。"
 
                     sampled_count += 1
                     coverage_sum += artifacts.weed_coverage_ratio
@@ -874,9 +1047,15 @@ class AnalysisRealtimeHub:
                     source_frame_path=artifacts.source_path,
                     heatmap_image_path=artifacts.heatmap_path,
                     mask_image_path=artifacts.mask_path,
+                    segmentation_image_path=artifacts.segmentation_path,
+                    overlay_segmentation_path=artifacts.overlay_segmentation_path,
                     weed_coverage_ratio=artifacts.weed_coverage_ratio,
+                    weed_area_ratio=artifacts.weed_area_ratio,
+                    crop_area_ratio=artifacts.crop_area_ratio,
+                    background_area_ratio=artifacts.background_area_ratio,
                     weed_pixel_area=artifacts.weed_pixel_area,
                     estimated_plant_count=artifacts.estimated_plant_count,
+                    weed_component_count=artifacts.weed_component_count,
                     average_confidence=artifacts.average_confidence,
                 )
                 db.add(frame_record)
@@ -892,14 +1071,20 @@ class AnalysisRealtimeHub:
                 latest_result.source_image_path = artifacts.source_path
                 latest_result.heatmap_image_path = artifacts.heatmap_path
                 latest_result.mask_image_path = artifacts.mask_path
-                latest_result.thumbnail_path = artifacts.heatmap_path
+                latest_result.segmentation_image_path = artifacts.segmentation_path
+                latest_result.overlay_segmentation_path = artifacts.overlay_segmentation_path
+                latest_result.thumbnail_path = artifacts.overlay_segmentation_path
                 latest_result.weed_coverage_ratio = artifacts.weed_coverage_ratio
+                latest_result.weed_area_ratio = artifacts.weed_area_ratio
+                latest_result.crop_area_ratio = artifacts.crop_area_ratio
+                latest_result.background_area_ratio = artifacts.background_area_ratio
                 latest_result.weed_pixel_area = artifacts.weed_pixel_area
                 latest_result.estimated_plant_count = artifacts.estimated_plant_count
+                latest_result.weed_component_count = artifacts.weed_component_count
                 latest_result.average_confidence = artifacts.average_confidence
                 latest_result.processing_time_ms = artifacts.processing_time_ms
                 latest_result.result_time = datetime.now(timezone.utc)
-                latest_result.summary_note = "模拟实时流采样分析进行中。"
+                latest_result.summary_note = "模拟实时流采样分析进行中，已生成热力图与彩色分割图。"
 
                 coverage_sum += artifacts.weed_coverage_ratio
                 confidence_sum += artifacts.average_confidence

@@ -11,6 +11,7 @@ import type {
   FramePreviewState,
   MetricCardData,
   PreviewMode,
+  ResultGalleryItem,
   SourceType,
 } from '../types';
 
@@ -33,12 +34,9 @@ interface AnalysisPageProps {
   sourceType: SourceType | null;
   sourceName: string;
   sourceLabelText: string;
-  compareMode: Exclude<PreviewMode, 'source'>;
-  setCompareMode: (mode: Exclude<PreviewMode, 'source'>) => void;
-  sourceImagePath: string;
-  compareImagePath: string;
-  sourceVideoPath: string;
-  shouldRenderSourceVideo: boolean;
+  previewMode: PreviewMode;
+  setPreviewMode: (mode: PreviewMode) => void;
+  galleryItems: ResultGalleryItem[];
   showOverlay: boolean;
   overlayOpacity: number;
   fitMode: 'contain' | 'cover';
@@ -58,7 +56,8 @@ interface AnalysisPageProps {
   isDetailLocked: boolean;
   onUnlockDetail: () => void;
   metricCards: MetricCardData[];
-  compositionItems: Array<{ label: string; value: string; meter: number; tone: string }>;
+  ratioChartData: Array<{ name: string; value: number; tone: 'success' | 'info' | 'warning' | 'danger' | 'muted' | 'neutral' }>;
+  barChartData: Array<{ name: string; value: number; tone: 'success' | 'info' | 'warning' | 'danger' | 'muted' | 'neutral' }>;
   modelSummary: Array<{ label: string; value: string }>;
   systemSummary: Array<{ label: string; value: string }>;
   onMetricHover: (key: string | null) => void;
@@ -87,17 +86,33 @@ export function AnalysisPage(props: AnalysisPageProps) {
           onStopCurrentJob={props.onStopCurrentJob}
         />
 
+        <div className="inspector-column">
+          <DetailInspector
+            detailTarget={props.activeDetailTarget}
+            isLocked={props.isDetailLocked}
+            onUnlock={props.onUnlockDetail}
+          />
+          <MetricsPanel
+            metricCards={props.metricCards}
+            ratioChartData={props.ratioChartData}
+            barChartData={props.barChartData}
+            modelSummary={props.modelSummary}
+            systemSummary={props.systemSummary}
+            onMetricHover={props.onMetricHover}
+            onMetricClick={props.onMetricClick}
+            onCompositionHover={props.onCompositionHover}
+            compositionDetail={props.compositionDetail}
+          />
+        </div>
+
         <section className="analysis-main-column">
           <ResultStage
             sourceType={props.sourceType}
             sourceName={props.sourceName}
             sourceLabelText={props.sourceLabelText}
-            compareMode={props.compareMode}
-            setCompareMode={props.setCompareMode}
-            sourceImagePath={props.sourceImagePath}
-            compareImagePath={props.compareImagePath}
-            sourceVideoPath={props.sourceVideoPath}
-            shouldRenderSourceVideo={props.shouldRenderSourceVideo}
+            previewMode={props.previewMode}
+            setPreviewMode={props.setPreviewMode}
+            galleryItems={props.galleryItems}
             showOverlay={props.showOverlay}
             overlayOpacity={props.overlayOpacity}
             fitMode={props.fitMode}
@@ -121,24 +136,6 @@ export function AnalysisPage(props: AnalysisPageProps) {
             </Link>
           </div>
         </section>
-
-        <div className="inspector-column">
-          <DetailInspector
-            detailTarget={props.activeDetailTarget}
-            isLocked={props.isDetailLocked}
-            onUnlock={props.onUnlockDetail}
-          />
-          <MetricsPanel
-            metricCards={props.metricCards}
-            compositionItems={props.compositionItems}
-            modelSummary={props.modelSummary}
-            systemSummary={props.systemSummary}
-            onMetricHover={props.onMetricHover}
-            onMetricClick={props.onMetricClick}
-            onCompositionHover={props.onCompositionHover}
-            compositionDetail={props.compositionDetail}
-          />
-        </div>
       </main>
     </div>
   );

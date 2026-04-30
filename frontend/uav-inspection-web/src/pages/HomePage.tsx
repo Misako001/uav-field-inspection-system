@@ -15,6 +15,12 @@ export function HomePage({
   entryCards,
   onEntryClick,
 }: HomePageProps) {
+  const heroFacts = [
+    { label: '系统状态', value: dashboard?.system.status ?? '等待系统状态' },
+    { label: '最近任务', value: latestDetailTarget.badge ?? '最近分析' },
+    { label: '视频链路', value: dashboard ? `${dashboard.video.rtmp_status} / ${dashboard.video.hls_status}` : '-- / --' },
+  ];
+
   return (
     <div className="home-page">
       <section className="panel home-hero">
@@ -24,11 +30,30 @@ export function HomePage({
           <p>
             首页只保留最高价值的实时摘要、最近一次分析结果和功能入口。真正的图片分析、趋势回看、关键帧对照都放到对应功能页里，避免你为了找一个按钮把整页拖到底。
           </p>
+          <div className="home-hero__meta">
+            {heroFacts.map((fact) => (
+              <div key={fact.label} className="home-hero__fact">
+                <span>{fact.label}</span>
+                <strong>{fact.value}</strong>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="home-hero__latest">
+          <div className="home-hero__latest-head">
+            <span className={`tag ${latestDetailTarget.tone}`}>{latestDetailTarget.badge ?? '最近分析'}</span>
+            <small>{latestDetailTarget.subtitle}</small>
+          </div>
           <strong>{latestDetailTarget.title}</strong>
-          <span>{latestDetailTarget.subtitle}</span>
           <p>{latestDetailTarget.description}</p>
+          <div className="home-hero__latest-grid">
+            {latestDetailTarget.fields.slice(0, 4).map((field) => (
+              <div key={field.label} className="home-hero__latest-item">
+                <span>{field.label}</span>
+                <strong>{field.value}</strong>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -87,7 +112,10 @@ export function HomePage({
                 <span>{card.subtitle}</span>
                 <strong>{card.title}</strong>
                 <p>{card.description}</p>
-                <em>{card.value}</em>
+                <div className="home-entry-card__footer">
+                  <em>{card.value}</em>
+                  <b>进入页面</b>
+                </div>
               </button>
             ))}
           </div>

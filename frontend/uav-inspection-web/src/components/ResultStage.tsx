@@ -1,15 +1,14 @@
-import type { DetailTarget, FramePreviewState, PreviewMode, SourceType } from '../types';
+import { useMemo, useState } from 'react';
+
+import type { DetailTarget, FramePreviewState, PreviewMode, ResultGalleryItem, SourceType } from '../types';
 
 interface ResultStageProps {
   sourceType: SourceType | null;
   sourceName: string;
   sourceLabelText: string;
-  compareMode: Exclude<PreviewMode, 'source'>;
-  setCompareMode: (mode: Exclude<PreviewMode, 'source'>) => void;
-  sourceImagePath: string;
-  compareImagePath: string;
-  sourceVideoPath: string;
-  shouldRenderSourceVideo: boolean;
+  previewMode: PreviewMode;
+  setPreviewMode: (mode: PreviewMode) => void;
+  galleryItems: ResultGalleryItem[];
   showOverlay: boolean;
   overlayOpacity: number;
   fitMode: 'contain' | 'cover';
@@ -29,40 +28,25 @@ interface ResultStageProps {
 
 function StageMedia({
   imagePath,
-  videoPath,
-  isVideo,
   fitMode,
   zoomLevel,
 }: {
   imagePath: string;
-  videoPath?: string;
-  isVideo?: boolean;
   fitMode: 'contain' | 'cover';
   zoomLevel: number;
 }) {
-  const className = `stage-media stage-media--${fitMode}`;
-  const style = { transform: `scale(${zoomLevel})` };
-
-  if (isVideo && videoPath) {
-    return (
-      <div className={className}>
-        <video src={videoPath} controls muted playsInline style={style} />
-      </div>
-    );
-  }
-
   if (!imagePath) {
     return (
       <div className="empty-stage">
         <strong>等待结果生成</strong>
-        <span>上传图片、视频或启动流分析后，这里会展示当前源画面。</span>
+        <span>上传图片、视频或启动流分析后，这里会展示当前源画面与分割结果。</span>
       </div>
     );
   }
 
   return (
-    <div className={className}>
-      <img src={imagePath} alt="源图像展示" style={style} />
+    <div className={`stage-media stage-media--${fitMode}`}>
+      <img src={imagePath} alt="结果展示" style={{ transform: `scale(${zoomLevel})` }} />
     </div>
   );
 }
@@ -71,12 +55,9 @@ export function ResultStage({
   sourceType,
   sourceName,
   sourceLabelText,
-  compareMode,
-  setCompareMode,
-  sourceImagePath,
-  compareImagePath,
-  sourceVideoPath,
-  shouldRenderSourceVideo,
+  previewMode,
+  setPreviewMode,
+  galleryItems,
   showOverlay,
   overlayOpacity,
   fitMode,
@@ -93,24 +74,38 @@ export function ResultStage({
   onStageDetailHover,
   stageDetailTarget,
 }: ResultStageProps) {
+  const [lightboxItem, setLightboxItem] = useState<ResultGalleryItem | null>(null);
+
+  const activeItem = useMemo(
+    () => galleryItems.find((item) => item.key === previewMode) ?? galleryItems[0] ?? null,
+    [galleryItems, previewMode],
+  );
+
+  const sourceItem = galleryItems.find((item) => item.key === 'source') ?? null;
+  const compareItem = activeItem?.key === 'source'
+    ? galleryItems.find((item) => item.key === 'segmentation') ?? galleryItems.find((item) => item.key === 'heatmap') ?? null
+    : activeItem;
+
   return (
     <section className="panel preview-panel">
       <div className="panel-header">
         <div>
-          <h2>图像对比舞台</h2>
+          <h2>结果展示区</h2>
           <span>{sourceType ? `${sourceLabelText} · ${sourceName}` : '等待分析结果进入工作台'}</span>
         </div>
         <div className="segmented-tabs compact">
-          {(['heatmap', 'mask'] as const).map((mode) => (
-            <button
-              key={mode}
-              className={compareMode === mode ? 'active' : ''}
-              onClick={() => setCompareMode(mode)}
-              type="button"
-            >
-              {mode === 'heatmap' ? '杂草热力图' : '杂草掩码图'}
-            </button>
-          ))}
+          {galleryItems
+            .filter((item) => item.key !== 'source')
+            .map((item) => (
+              <button
+                key={item.key}
+                className={previewMode === item.key ? 'active' : ''}
+                onClick={() => setPreviewMode(item.key)}
+                type="button"
+              >
+                {item.label}
+              </button>
+            ))}
         </div>
       </div>
 
@@ -129,7 +124,7 @@ export function ResultStage({
             className={`secondary-button toolbar-button ${showOverlay ? 'is-active' : ''}`}
             onClick={onToggleOverlay}
           >
-            {showOverlay ? '隐藏叠加层' : '显示叠加层'}
+            {showOverlay ? '叠加显示' : '单图显示'}
           </button>
           <label className="opacity-control">
             <span>透明度</span>
@@ -145,73 +140,95 @@ export function ResultStage({
         </div>
       </div>
 
-      <div className="compare-stage-grid">
-        <article
-          className="stage-card"
-          onMouseEnter={() => onStageDetailHover(stageDetailTarget)}
-          onMouseLeave={() => onStageDetailHover(null)}
-        >
-          <div className="stage-card__header">
-            <span className="eyebrow">源画面</span>
-            <strong>{sourceType === 'video' || sourceType === 'stream' ? '当前抽帧' : '原始图像'}</strong>
+      <div
+        className="result-stage-feature"
+        onMouseEnter={() => onStageDetailHover(stageDetailTarget)}
+        onMouseLeave={() => onStageDetailHover(null)}
+      >
+        <div className="result-stage-feature__meta">
+          <div>
+            <span className="eyebrow">主预览</span>
+            <h3>{activeItem?.label ?? '等待结果'}</h3>
+            <p>{activeItem?.description ?? '上传后会在这里显示热力图、分割图或掩码图。'}</p>
           </div>
-          <div className="media-stage hero">
-            <StageMedia
-              imagePath={sourceImagePath}
-              videoPath={sourceVideoPath}
-              isVideo={shouldRenderSourceVideo}
-              fitMode={fitMode}
-              zoomLevel={zoomLevel}
-            />
-          </div>
-        </article>
+          {activeItem?.imagePath ? (
+            <button type="button" className="secondary-button toolbar-button" onClick={() => setLightboxItem(activeItem)}>
+              点击放大预览
+            </button>
+          ) : null}
+        </div>
 
-        <article
-          className="stage-card emphasis"
-          onMouseEnter={() => onStageDetailHover(stageDetailTarget)}
-          onMouseLeave={() => onStageDetailHover(null)}
-        >
-          <div className="stage-card__header">
-            <span className="eyebrow">模型结果</span>
-            <strong>{compareMode === 'heatmap' ? '杂草概率热力图' : '杂草分割掩码图'}</strong>
-          </div>
-          <div className="media-stage hero overlay-enabled">
-            {sourceImagePath && (
-              <div className={`stage-media stage-media--${fitMode}`}>
-                <img src={sourceImagePath} alt="源图像底图" style={{ transform: `scale(${zoomLevel})` }} />
-              </div>
-            )}
-            {compareImagePath ? (
-              <div className={`stage-media stage-media--${fitMode} overlay-layer ${showOverlay ? 'visible' : 'standalone'}`}>
-                <img
-                  src={compareImagePath}
-                  alt="模型结果图层"
-                  style={{
-                    transform: `scale(${zoomLevel})`,
-                    opacity: showOverlay ? overlayOpacity : 1,
-                  }}
-                />
-              </div>
-            ) : (
-              <div className="empty-stage">
-                <strong>等待结果生成</strong>
-                <span>模型完成推理后，这里会展示热力图或掩码图。</span>
-              </div>
-            )}
-          </div>
-        </article>
+        <div className="compare-stage-grid compare-stage-grid--gallery">
+          <article className="stage-card">
+            <div className="stage-card__header">
+              <span className="eyebrow">源画面</span>
+              <strong>{sourceType === 'video' || sourceType === 'stream' ? '当前抽帧' : '原始图像'}</strong>
+            </div>
+            <div className="media-stage hero">
+              <StageMedia imagePath={sourceItem?.imagePath ?? ''} fitMode={fitMode} zoomLevel={zoomLevel} />
+            </div>
+          </article>
+
+          <article className="stage-card emphasis">
+            <div className="stage-card__header">
+              <span className="eyebrow">模型结果</span>
+              <strong>{compareItem?.label ?? '等待分析结果'}</strong>
+            </div>
+            <div className="media-stage hero overlay-enabled">
+              {showOverlay && sourceItem?.imagePath && compareItem?.imagePath && compareItem.key !== 'mask' ? (
+                <>
+                  <div className={`stage-media stage-media--${fitMode}`}>
+                    <img src={sourceItem.imagePath} alt="源图像底图" style={{ transform: `scale(${zoomLevel})` }} />
+                  </div>
+                  <div className={`stage-media stage-media--${fitMode} overlay-layer visible`}>
+                    <img
+                      src={compareItem.imagePath}
+                      alt={compareItem.label}
+                      style={{
+                        transform: `scale(${zoomLevel})`,
+                        opacity: overlayOpacity,
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <StageMedia imagePath={compareItem?.imagePath ?? ''} fitMode={fitMode} zoomLevel={zoomLevel} />
+              )}
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div className="gallery-grid">
+        {galleryItems.map((item) => (
+          <button
+            key={item.key}
+            type="button"
+            className={`gallery-card ${previewMode === item.key ? 'active' : ''}`}
+            onClick={() => setPreviewMode(item.key)}
+            onDoubleClick={() => setLightboxItem(item)}
+          >
+            <div className="gallery-card__preview">
+              {item.imagePath ? <img src={item.imagePath} alt={item.label} /> : <div className="empty-stage compact">等待结果</div>}
+            </div>
+            <div className="gallery-card__meta">
+              <strong>{item.label}</strong>
+              <span>{item.description}</span>
+            </div>
+          </button>
+        ))}
       </div>
 
       <div className="stage-footer">
         <div className="legend-row">
-          <span>杂草概率热度</span>
+          <span>红色表示疑似杂草</span>
           <div className="heatmap-legend" />
-          <span>低</span>
-          <span>高</span>
+          <span>蓝灰表示背景</span>
+          <span>绿色表示烟株</span>
         </div>
         <div className="stage-footnote">
-          <strong>悬停关键帧、指标卡、趋势点</strong>
-          <span>右侧详情检查器会联动解释统计口径、当前结果和任务上下文。</span>
+          <strong>单击切换主预览，双击放大</strong>
+          <span>建议结合原图、热力图和分割图一起判断结果是否与真实田间状态一致。</span>
         </div>
       </div>
 
@@ -237,6 +254,23 @@ export function ResultStage({
           </div>
         )}
       </div>
+
+      {lightboxItem?.imagePath ? (
+        <div className="lightbox-backdrop" onClick={() => setLightboxItem(null)}>
+          <div className="lightbox-panel" onClick={(event) => event.stopPropagation()}>
+            <div className="lightbox-panel__header">
+              <div>
+                <span className="eyebrow">放大预览</span>
+                <strong>{lightboxItem.label}</strong>
+              </div>
+              <button type="button" className="secondary-button toolbar-button" onClick={() => setLightboxItem(null)}>
+                关闭
+              </button>
+            </div>
+            <img src={lightboxItem.imagePath} alt={lightboxItem.label} className="lightbox-panel__image" />
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

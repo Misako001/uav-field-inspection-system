@@ -1,6 +1,6 @@
 export type SourceType = 'image' | 'video' | 'stream';
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
-export type PreviewMode = 'source' | 'heatmap' | 'mask';
+export type PreviewMode = 'source' | 'heatmap' | 'segmentation' | 'mask';
 export type Tone = 'success' | 'info' | 'warning' | 'danger' | 'muted' | 'neutral';
 export type DetailTargetType = 'summary' | 'metric' | 'frame' | 'job' | 'trend';
 export type AppRoute = 'home' | 'analysis' | 'history';
@@ -84,10 +84,16 @@ export interface AnalysisResult {
   source_image_path: string;
   heatmap_image_path: string;
   mask_image_path: string;
+  segmentation_image_path: string;
+  overlay_segmentation_path: string;
   thumbnail_path: string;
   weed_coverage_ratio: number;
+  weed_area_ratio: number;
+  crop_area_ratio: number;
+  background_area_ratio: number;
   weed_pixel_area: number;
   estimated_plant_count: number;
+  weed_component_count: number;
   average_confidence: number;
   processing_time_ms: number;
   result_time: string;
@@ -102,9 +108,15 @@ export interface AnalysisFrame {
   source_frame_path: string;
   heatmap_image_path: string;
   mask_image_path: string;
+  segmentation_image_path: string;
+  overlay_segmentation_path: string;
   weed_coverage_ratio: number;
+  weed_area_ratio: number;
+  crop_area_ratio: number;
+  background_area_ratio: number;
   weed_pixel_area: number;
   estimated_plant_count: number;
+  weed_component_count: number;
   average_confidence: number;
   created_at: string;
 }
@@ -171,7 +183,6 @@ export interface MetricCardData {
   hint: string;
   footnote: string;
   meter: number;
-  trend: number[];
 }
 
 export interface FramePreviewState {
@@ -183,6 +194,14 @@ export interface FramePreviewState {
   confidenceLabel: string;
   previewImagePath: string;
   active: boolean;
+}
+
+export interface ResultGalleryItem {
+  key: PreviewMode;
+  label: string;
+  description: string;
+  imagePath: string;
+  tone: Tone;
 }
 
 export interface HomeOverviewCard {

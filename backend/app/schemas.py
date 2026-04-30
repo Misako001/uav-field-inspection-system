@@ -68,9 +68,15 @@ class AnalysisFrameRead(BaseModel):
     source_frame_path: str
     heatmap_image_path: str
     mask_image_path: str
+    segmentation_image_path: str
+    overlay_segmentation_path: str
     weed_coverage_ratio: float
+    weed_area_ratio: float
+    crop_area_ratio: float
+    background_area_ratio: float
     weed_pixel_area: int
     estimated_plant_count: int
+    weed_component_count: int
     average_confidence: float
     created_at: datetime
 
@@ -83,10 +89,16 @@ class AnalysisResultRead(BaseModel):
     source_image_path: str
     heatmap_image_path: str
     mask_image_path: str
+    segmentation_image_path: str
+    overlay_segmentation_path: str
     thumbnail_path: str
     weed_coverage_ratio: float
+    weed_area_ratio: float
+    crop_area_ratio: float
+    background_area_ratio: float
     weed_pixel_area: int
     estimated_plant_count: int
+    weed_component_count: int
     average_confidence: float
     processing_time_ms: int
     result_time: datetime
