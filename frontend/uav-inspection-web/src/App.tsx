@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } fr
 import {
   apiBaseUrl,
   createStreamJob,
+  deleteJobHistory,
   fetchJobDetail,
   fetchJobList,
   openAnalysisRealtimeSocket,
@@ -111,6 +112,7 @@ export default function App() {
   });
   const [message, setMessage] = useState('系统已就绪，可直接开始杂草分割分析，支持图片、视频和实时流。');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
   const [isBackendOnline, setIsBackendOnline] = useState(true);
   const [imageFileName, setImageFileName] = useState('');
   const [videoFileName, setVideoFileName] = useState('');
@@ -254,6 +256,10 @@ export default function App() {
     () => toAbsoluteAssetUrl(selectedFrame?.heatmap_image_path ?? currentResult?.heatmap_image_path),
     [currentResult?.heatmap_image_path, selectedFrame?.heatmap_image_path],
   );
+  const segmentationPreviewPath = useMemo(
+    () => toAbsoluteAssetUrl(currentResult?.thumbnail_path ?? selectedFrame?.overlay_segmentation_path ?? currentResult?.overlay_segmentation_path ?? selectedFrame?.segmentation_image_path ?? currentResult?.segmentation_image_path),
+    [currentResult?.thumbnail_path, currentResult?.overlay_segmentation_path, currentResult?.segmentation_image_path, selectedFrame?.overlay_segmentation_path, selectedFrame?.segmentation_image_path],
+  );
   const segmentationImagePath = useMemo(
     () => toAbsoluteAssetUrl(selectedFrame?.overlay_segmentation_path ?? currentResult?.overlay_segmentation_path ?? selectedFrame?.segmentation_image_path ?? currentResult?.segmentation_image_path),
     [currentResult?.overlay_segmentation_path, currentResult?.segmentation_image_path, selectedFrame?.overlay_segmentation_path, selectedFrame?.segmentation_image_path],
@@ -387,6 +393,7 @@ export default function App() {
       label: '分割结果图',
       description: '背景 / 烟株 / 杂草 三分类叠加图',
       imagePath: segmentationImagePath,
+      previewImagePath: segmentationPreviewPath,
       tone: 'success',
     },
     {
@@ -396,7 +403,7 @@ export default function App() {
       imagePath: maskImagePath,
       tone: 'info',
     },
-  ]), [heatmapImagePath, maskImagePath, segmentationImagePath, sourceImagePath]);
+  ]), [heatmapImagePath, maskImagePath, segmentationImagePath, segmentationPreviewPath, sourceImagePath]);
 
   const activePreviewItem = useMemo(
     () => galleryItems.find((item) => item.key === previewMode) ?? galleryItems[0],
@@ -901,6 +908,37 @@ export default function App() {
     }
   }
 
+  async function handleDeleteHistoryJob(jobId: number) {
+    const confirmed = window.confirm(`确认删除历史记录 #${jobId} 吗？对应结果图和统计文件也会一起删除。`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingJobId(jobId);
+    try {
+      const response = await deleteJobHistory(jobId);
+      const remainingJobs = historyJobs.filter((item) => item.id !== jobId);
+      setLockedDetailTarget(null);
+      setHoveredDetailTarget(null);
+
+      const nextSelectedJobId = selectedJob?.job.id === jobId
+        ? (remainingJobs[0]?.id ?? null)
+        : (selectedJob?.job.id ?? remainingJobs[0]?.id ?? null);
+
+      if (selectedJob?.job.id === jobId && location.pathname === '/analysis') {
+        navigate(nextSelectedJobId ? `/analysis?jobId=${nextSelectedJobId}` : '/analysis');
+      }
+
+      setMessage(response.message);
+      await refreshHistory(false, nextSelectedJobId);
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      setMessage(typeof detail === 'string' ? detail : `删除历史记录 #${jobId} 失败，请稍后重试。`);
+    } finally {
+      setDeletingJobId(null);
+    }
+  }
+
   async function openHistoryJob(jobId: number, navigateToAnalysis = false) {
     try {
       const detail = await fetchJobDetail(jobId);
@@ -1085,7 +1123,9 @@ export default function App() {
               selectedHistoryStatus={historySelection.selectedHistoryStatus}
               onSelectHistoryType={(value) => setHistorySelection((current) => ({ ...current, selectedHistoryType: value }))}
               onSelectHistoryStatus={(value) => setHistorySelection((current) => ({ ...current, selectedHistoryStatus: value }))}
-              onOpenJob={(jobId) => void openHistoryJob(jobId)}
+              onOpenJob={(jobId) => void openHistoryJob(jobId, true)}
+              onDeleteJob={(jobId) => void handleDeleteHistoryJob(jobId)}
+              deletingJobId={deletingJobId}
               onJobHover={handleJobHover}
               onJobLock={handleJobLock}
               historyDetailTarget={historyActiveDetailTarget}

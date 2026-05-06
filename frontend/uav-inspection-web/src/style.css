@@ -420,7 +420,7 @@ button:hover {
 
 .home-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(300px, 380px);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   min-height: 0;
 }
@@ -430,6 +430,13 @@ button:hover {
 .history-actions-panel {
   gap: 16px;
   min-height: 0;
+}
+
+.home-entry-panel--lead {
+  background:
+    radial-gradient(circle at top right, rgba(33, 208, 122, 0.08), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(53, 167, 255, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(17, 28, 40, 0.96), rgba(11, 19, 28, 0.98));
 }
 
 .home-overview-grid {
@@ -509,6 +516,10 @@ button:hover {
   gap: 12px;
 }
 
+.home-entry-grid--lead {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .home-entry-card {
   text-align: left;
   display: grid;
@@ -560,6 +571,74 @@ button:hover {
   grid-template-columns: minmax(280px, 0.86fr) minmax(340px, 0.96fr) minmax(0, 1.42fr);
   min-height: 0;
   overflow-x: hidden;
+}
+
+.analysis-page-stack {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 18px;
+  min-height: 0;
+}
+
+.analysis-stack-top,
+.analysis-stack-stage,
+.analysis-stack-bottom {
+  min-width: 0;
+}
+
+.analysis-stack-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  grid-template-areas: "input actions";
+  gap: 18px;
+  align-items: start;
+}
+
+.analysis-stack-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.analysis-stack-top > .input-panel {
+  grid-area: input;
+}
+
+.analysis-stack-actions-panel {
+  grid-area: actions;
+  gap: 14px;
+  align-self: start;
+}
+
+.analysis-stack-actions-panel__body {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-stack-actions-panel__body strong {
+  font-size: clamp(20px, 1.5vw, 28px);
+  line-height: 1.2;
+}
+
+.analysis-stack-actions-panel__body p {
+  margin: 0;
+  color: #9eb4c8;
+  line-height: 1.7;
+}
+
+.analysis-stack-actions-panel .history-link-button {
+  width: fit-content;
+}
+
+.analysis-stack-stage {
+  min-height: 0;
+}
+
+.analysis-stack-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr);
+  gap: 18px;
+  align-items: start;
+  min-height: 0;
 }
 
 .analysis-main-column {
@@ -1550,15 +1629,28 @@ button:hover {
 
 .history-item {
   padding: 14px;
-  text-align: left;
   display: grid;
   gap: 10px;
+  text-align: left;
+  cursor: default;
 }
 
 .history-item.active {
   border-color: var(--success);
   background: #132232;
   box-shadow: inset 0 0 0 1px rgba(33, 208, 122, 0.2);
+}
+
+.history-item__open {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
 }
 
 .history-item-head,
@@ -1580,11 +1672,23 @@ button:hover {
   font-size: 12px;
 }
 
+.history-item-head__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .history-name {
   display: block;
   color: #dbe7f3;
   font-size: 14px;
   font-weight: 600;
+}
+
+.history-delete-button {
+  min-width: 82px;
+  padding: 8px 12px;
 }
 
 .trend-panel-card,
@@ -1661,7 +1765,7 @@ button:hover {
   }
 
   .home-grid {
-    grid-template-columns: minmax(0, 1.12fr) minmax(280px, 340px);
+    grid-template-columns: 1fr;
   }
 
   .home-hero {
@@ -1740,6 +1844,17 @@ button:hover {
     grid-area: main;
   }
 
+  .analysis-stack-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .analysis-stack-top {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "input"
+      "actions";
+  }
+
   .inspector-column {
     grid-area: inspector;
     grid-template-rows: minmax(300px, auto) minmax(280px, auto);
@@ -1769,6 +1884,7 @@ button:hover {
   }
 
   .home-entry-grid,
+  .home-entry-grid--lead,
   .home-overview-grid,
   .metric-grid,
   .chart-grid,
@@ -1788,5 +1904,9 @@ button:hover {
   .home-hero__meta,
   .home-hero__latest-grid {
     grid-template-columns: 1fr;
+  }
+
+  .analysis-stack-actions {
+    justify-content: flex-start;
   }
 }

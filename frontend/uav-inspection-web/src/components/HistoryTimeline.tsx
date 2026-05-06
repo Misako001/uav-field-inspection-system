@@ -9,6 +9,8 @@ interface HistoryTimelineProps {
   onSelectHistoryType: (value: string) => void;
   onSelectHistoryStatus: (value: string) => void;
   onOpenJob: (jobId: number) => void;
+  onDeleteJob: (jobId: number) => void;
+  deletingJobId: number | null;
   onJobHover: (jobId: number | null) => void;
   onJobLock: (jobId: number) => void;
 }
@@ -21,6 +23,8 @@ export function HistoryTimeline({
   onSelectHistoryType,
   onSelectHistoryStatus,
   onOpenJob,
+  onDeleteJob,
+  deletingJobId,
   onJobHover,
   onJobLock,
 }: HistoryTimelineProps) {
@@ -50,32 +54,49 @@ export function HistoryTimeline({
 
       <div className="history-card-grid">
         {historyJobs.length > 0 ? historyJobs.map((job) => (
-          <button
+          <article
             key={job.id}
-            type="button"
             className={`history-item ${selectedJobId === job.id ? 'active' : ''}`}
             onMouseEnter={() => onJobHover(job.id)}
             onMouseLeave={() => onJobHover(null)}
-            onClick={() => {
-              onOpenJob(job.id);
-              onJobLock(job.id);
-            }}
           >
             <div className="history-item-head">
               <strong>#{job.id} · {sourceLabel(job.source_type)}</strong>
-              <span className={`tag ${statusTone(job.status)}`}>{statusLabel(job.status)}</span>
+              <div className="history-item-head__actions">
+                <span className={`tag ${statusTone(job.status)}`}>{statusLabel(job.status)}</span>
+                <button
+                  type="button"
+                  className="ghost-danger-button history-delete-button"
+                  disabled={deletingJobId === job.id}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteJob(job.id);
+                  }}
+                >
+                  {deletingJobId === job.id ? '删除中...' : '删除'}
+                </button>
+              </div>
             </div>
-            <span className="history-name">{job.source_name}</span>
-            <div className="history-stat-grid">
-              <span>覆盖率 {formatPercent(job.average_coverage_ratio || 0)}</span>
-              <span>植株估算 {job.estimated_plant_count}</span>
-              <span>平均置信度 {(job.average_confidence * 100).toFixed(1)}%</span>
-            </div>
-            <div className="history-item-meta">
-              <span>{formatDateTime(job.created_at)}</span>
-              <span>{job.model_backend}</span>
-            </div>
-          </button>
+            <button
+              type="button"
+              className="history-item__open"
+              onClick={() => {
+                onOpenJob(job.id);
+                onJobLock(job.id);
+              }}
+            >
+              <span className="history-name">{job.source_name}</span>
+              <div className="history-stat-grid">
+                <span>覆盖率 {formatPercent(job.average_coverage_ratio || 0)}</span>
+                <span>植株估算 {job.estimated_plant_count}</span>
+                <span>平均置信度 {(job.average_confidence * 100).toFixed(1)}%</span>
+              </div>
+              <div className="history-item-meta">
+                <span>{formatDateTime(job.created_at)}</span>
+                <span>{job.model_backend}</span>
+              </div>
+            </button>
+          </article>
         )) : (
           <div className="history-empty">
             <strong>暂无历史结果</strong>

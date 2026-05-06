@@ -157,6 +157,12 @@ class AnalysisStopResponse(BaseModel):
     message: str
 
 
+class AnalysisDeleteResponse(BaseModel):
+    job_id: int
+    status: str
+    message: str
+
+
 class AnalysisRealtimePayload(BaseModel):
     event: str
     emitted_at: datetime

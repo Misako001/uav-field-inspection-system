@@ -22,6 +22,7 @@ from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.models import AnalysisFrame, AnalysisJob, AnalysisResult
 from app.schemas import (
+    AnalysisDeleteResponse,
     AnalysisFrameRead,
     AnalysisImageResponse,
     AnalysisJobDetailRead,
@@ -301,6 +302,22 @@ def _write_mask_image(mask: np.ndarray, destination: Path) -> None:
     cv2.imwrite(str(destination), (mask.astype(np.uint8) * 255))
 
 
+def _write_preview_thumbnail(image_rgb: np.ndarray, destination: Path, *, max_edge: int = 1600, jpeg_quality: int = 86) -> None:
+    height, width = image_rgb.shape[:2]
+    longest_edge = max(height, width)
+    preview = image_rgb
+    if longest_edge > max_edge:
+        scale = max_edge / float(longest_edge)
+        preview = cv2.resize(
+            image_rgb,
+            (max(1, int(round(width * scale))), max(1, int(round(height * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    preview_bgr = cv2.cvtColor(preview, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(str(destination), preview_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), int(jpeg_quality)])
+
+
 def _kernel(size: int) -> np.ndarray:
     size = max(1, int(size))
     if size % 2 == 0:
@@ -432,6 +449,7 @@ class RenderArtifacts:
     mask_path: str
     segmentation_path: str
     overlay_segmentation_path: str
+    thumbnail_path: str
     weed_coverage_ratio: float
     weed_area_ratio: float
     crop_area_ratio: float
@@ -472,12 +490,14 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
     heatmap_path = result_root / f"{file_stem}_heatmap.jpg"
     segmentation_path = result_root / f"{file_stem}_segmentation.jpg"
     overlay_segmentation_path = result_root / f"{file_stem}_segmentation_overlay.jpg"
+    thumbnail_path = result_root / f"{file_stem}_thumbnail.jpg"
     mask_path = mask_root / f"{file_stem}_mask.png"
 
     _write_rgb_image(image_rgb, source_path)
     _write_rgb_image(heatmap_rgb, heatmap_path)
     _write_rgb_image(segmentation_rgb, segmentation_path)
     _write_rgb_image(segmentation_overlay_rgb, overlay_segmentation_path)
+    _write_preview_thumbnail(segmentation_overlay_rgb, thumbnail_path)
     _write_mask_image(inference.binary_mask, mask_path)
 
     return RenderArtifacts(
@@ -487,6 +507,7 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
         mask_path=as_public_storage_path(mask_path, settings),
         segmentation_path=as_public_storage_path(segmentation_path, settings),
         overlay_segmentation_path=as_public_storage_path(overlay_segmentation_path, settings),
+        thumbnail_path=as_public_storage_path(thumbnail_path, settings),
         weed_coverage_ratio=coverage_ratio,
         weed_area_ratio=coverage_ratio,
         crop_area_ratio=crop_area_ratio,
@@ -523,7 +544,7 @@ def run_image_analysis(db: Session, job: AnalysisJob, source_file_path: Path) ->
         mask_image_path=artifacts.mask_path,
         segmentation_image_path=artifacts.segmentation_path,
         overlay_segmentation_path=artifacts.overlay_segmentation_path,
-        thumbnail_path=artifacts.overlay_segmentation_path,
+        thumbnail_path=artifacts.thumbnail_path,
         weed_coverage_ratio=artifacts.weed_coverage_ratio,
         weed_area_ratio=artifacts.weed_area_ratio,
         crop_area_ratio=artifacts.crop_area_ratio,
@@ -620,6 +641,8 @@ def get_analysis_job_detail(db: Session, job_id: int, *, frame_limit: int = 16) 
     if job.latest_result_id:
         result = db.get(AnalysisResult, job.latest_result_id)
         if result is not None:
+            _ensure_result_preview_assets(result)
+            db.commit()
             latest_result = AnalysisResultRead.model_validate(result)
 
     frames = db.scalars(
@@ -633,6 +656,110 @@ def get_analysis_job_detail(db: Session, job_id: int, *, frame_limit: int = 16) 
         job=AnalysisJobRead.model_validate(job),
         latest_result=latest_result,
         frames=[AnalysisFrameRead.model_validate(frame) for frame in reversed(frames)],
+    )
+
+
+def _storage_path_from_public_path(path: str | None, settings: Settings) -> Path | None:
+    if not path or not path.startswith("/storage/"):
+        return None
+    relative = path.removeprefix("/storage/").strip("/")
+    if not relative:
+        return None
+    return settings.storage_root_path / relative
+
+
+def _ensure_result_preview_assets(result: AnalysisResult, settings: Settings | None = None) -> None:
+    settings = settings or get_settings()
+    overlay_path = _storage_path_from_public_path(result.overlay_segmentation_path, settings)
+    if overlay_path is None or not overlay_path.exists():
+        return
+
+    thumb_path = _storage_path_from_public_path(result.thumbnail_path, settings)
+    if thumb_path and thumb_path.exists() and thumb_path.stat().st_size > 0 and thumb_path != overlay_path:
+        return
+
+    target_path = overlay_path.with_name(f"{overlay_path.stem}_thumbnail.jpg")
+    image_rgb = _read_rgb_image(overlay_path)
+    _write_preview_thumbnail(image_rgb, target_path)
+    result.thumbnail_path = as_public_storage_path(target_path, settings)
+
+
+def _remove_storage_path(path: Path, settings: Settings) -> None:
+    if not path.exists():
+        return
+    if path.is_file():
+        path.unlink(missing_ok=True)
+    elif path.is_dir():
+        for child in sorted(path.rglob("*"), reverse=True):
+            if child.is_file():
+                child.unlink(missing_ok=True)
+            elif child.is_dir():
+                child.rmdir()
+        path.rmdir()
+
+    current = path.parent
+    while current != settings.storage_root_path and current.exists():
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def delete_analysis_job(db: Session, job_id: int) -> AnalysisDeleteResponse:
+    settings = get_settings()
+    job = get_job_or_404(db, job_id)
+    if job.status in {"running", "pending"}:
+        raise HTTPException(status_code=409, detail="运行中的任务请先停止，再删除历史记录。")
+
+    result_records = db.scalars(select(AnalysisResult).where(AnalysisResult.job_id == job.id)).all()
+    frame_records = db.scalars(select(AnalysisFrame).where(AnalysisFrame.job_id == job.id)).all()
+
+    storage_targets: set[Path] = set()
+    source_media_path = _storage_path_from_public_path(job.source_media_path, settings)
+    if source_media_path is not None:
+        storage_targets.add(source_media_path)
+
+    for result in result_records:
+        for public_path in (
+            result.source_image_path,
+            result.heatmap_image_path,
+            result.mask_image_path,
+            result.segmentation_image_path,
+            result.overlay_segmentation_path,
+            result.thumbnail_path,
+        ):
+            resolved = _storage_path_from_public_path(public_path, settings)
+            if resolved is not None:
+                storage_targets.add(resolved)
+
+    for frame in frame_records:
+        for public_path in (
+            frame.source_frame_path,
+            frame.heatmap_image_path,
+            frame.mask_image_path,
+            frame.segmentation_image_path,
+            frame.overlay_segmentation_path,
+        ):
+            resolved = _storage_path_from_public_path(public_path, settings)
+            if resolved is not None:
+                storage_targets.add(resolved)
+
+    db.query(AnalysisFrame).filter(AnalysisFrame.job_id == job.id).delete(synchronize_session=False)
+    db.query(AnalysisResult).filter(AnalysisResult.job_id == job.id).delete(synchronize_session=False)
+    db.delete(job)
+    db.commit()
+
+    for target in sorted(storage_targets, key=lambda item: len(item.parts), reverse=True):
+        try:
+            _remove_storage_path(target, settings)
+        except OSError as exc:
+            logger.warning("Failed to remove storage asset for job %s: %s", job_id, exc)
+
+    return AnalysisDeleteResponse(
+        job_id=job_id,
+        status="deleted",
+        message="历史记录及对应结果文件已删除。",
     )
 
 
@@ -837,7 +964,7 @@ class AnalysisRealtimeHub:
                 latest_result.mask_image_path = artifacts.mask_path
                 latest_result.segmentation_image_path = artifacts.segmentation_path
                 latest_result.overlay_segmentation_path = artifacts.overlay_segmentation_path
-                latest_result.thumbnail_path = artifacts.overlay_segmentation_path
+                latest_result.thumbnail_path = artifacts.thumbnail_path
                 latest_result.weed_coverage_ratio = artifacts.weed_coverage_ratio
                 latest_result.weed_area_ratio = artifacts.weed_area_ratio
                 latest_result.crop_area_ratio = artifacts.crop_area_ratio
@@ -970,7 +1097,7 @@ class AnalysisRealtimeHub:
                     latest_result.mask_image_path = artifacts.mask_path
                     latest_result.segmentation_image_path = artifacts.segmentation_path
                     latest_result.overlay_segmentation_path = artifacts.overlay_segmentation_path
-                    latest_result.thumbnail_path = artifacts.overlay_segmentation_path
+                    latest_result.thumbnail_path = artifacts.thumbnail_path
                     latest_result.weed_coverage_ratio = artifacts.weed_coverage_ratio
                     latest_result.weed_area_ratio = artifacts.weed_area_ratio
                     latest_result.crop_area_ratio = artifacts.crop_area_ratio
@@ -1073,7 +1200,7 @@ class AnalysisRealtimeHub:
                 latest_result.mask_image_path = artifacts.mask_path
                 latest_result.segmentation_image_path = artifacts.segmentation_path
                 latest_result.overlay_segmentation_path = artifacts.overlay_segmentation_path
-                latest_result.thumbnail_path = artifacts.overlay_segmentation_path
+                latest_result.thumbnail_path = artifacts.thumbnail_path
                 latest_result.weed_coverage_ratio = artifacts.weed_coverage_ratio
                 latest_result.weed_area_ratio = artifacts.weed_area_ratio
                 latest_result.crop_area_ratio = artifacts.crop_area_ratio

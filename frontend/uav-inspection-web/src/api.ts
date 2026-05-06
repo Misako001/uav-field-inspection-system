@@ -1,6 +1,7 @@
 import axios from 'axios';
 
 import type {
+  AnalysisDeleteResponse,
   AnalysisImageResponse,
   AnalysisJobDetail,
   AnalysisJobList,
@@ -72,6 +73,11 @@ export async function fetchJobList(filters: { sourceType?: string; status?: stri
 
 export async function stopJob(jobId: number): Promise<void> {
   await apiClient.post(`/api/analysis/jobs/${jobId}/stop`);
+}
+
+export async function deleteJobHistory(jobId: number): Promise<AnalysisDeleteResponse> {
+  const { data } = await apiClient.delete<AnalysisDeleteResponse>(`/api/analysis/jobs/${jobId}`);
+  return data;
 }
 
 export function openDashboardRealtimeSocket(onMessage: (payload: DashboardRealtimePayload) => void): WebSocket {

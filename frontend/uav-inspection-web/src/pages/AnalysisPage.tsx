@@ -69,43 +69,42 @@ interface AnalysisPageProps {
 export function AnalysisPage(props: AnalysisPageProps) {
   return (
     <div className="page-body">
-      <main className="workspace-grid analysis-page-grid">
-        <AnalysisInputPanel
-          activeTab={props.activeTab}
-          setActiveTab={props.setActiveTab}
-          selectedJob={props.selectedJob}
-          imageFileName={props.imageFileName}
-          videoFileName={props.videoFileName}
-          streamUrl={props.streamUrl}
-          setStreamUrl={props.setStreamUrl}
-          onImageUpload={props.onImageUpload}
-          onVideoUpload={props.onVideoUpload}
-          onDroppedFile={props.onDroppedFile}
-          onCreateStream={props.onCreateStream}
-          onRefreshHistory={props.onRefreshHistory}
-          onStopCurrentJob={props.onStopCurrentJob}
-        />
-
-        <div className="inspector-column">
-          <DetailInspector
-            detailTarget={props.activeDetailTarget}
-            isLocked={props.isDetailLocked}
-            onUnlock={props.onUnlockDetail}
+      <main className="analysis-page-stack">
+        <section className="analysis-stack-top">
+          <AnalysisInputPanel
+            activeTab={props.activeTab}
+            setActiveTab={props.setActiveTab}
+            selectedJob={props.selectedJob}
+            imageFileName={props.imageFileName}
+            videoFileName={props.videoFileName}
+            streamUrl={props.streamUrl}
+            setStreamUrl={props.setStreamUrl}
+            onImageUpload={props.onImageUpload}
+            onVideoUpload={props.onVideoUpload}
+            onDroppedFile={props.onDroppedFile}
+            onCreateStream={props.onCreateStream}
+            onRefreshHistory={props.onRefreshHistory}
+            onStopCurrentJob={props.onStopCurrentJob}
           />
-          <MetricsPanel
-            metricCards={props.metricCards}
-            ratioChartData={props.ratioChartData}
-            barChartData={props.barChartData}
-            modelSummary={props.modelSummary}
-            systemSummary={props.systemSummary}
-            onMetricHover={props.onMetricHover}
-            onMetricClick={props.onMetricClick}
-            onCompositionHover={props.onCompositionHover}
-            compositionDetail={props.compositionDetail}
-          />
-        </div>
 
-        <section className="analysis-main-column">
+          <aside className="panel analysis-stack-actions-panel">
+            <div className="panel-header">
+              <div>
+                <h2>历史与回看</h2>
+                <span>快速进入历史分析页，对比旧任务结果并回跳到当前工作台。</span>
+              </div>
+            </div>
+            <div className="analysis-stack-actions-panel__body">
+              <strong>查看更多历史结果与趋势分析</strong>
+              <p>适合回看历史任务、筛选图片结果、对比不同烟田样本的分割表现。</p>
+              <Link to="/history" className="secondary-button history-link-button">
+                进入历史分析
+              </Link>
+            </div>
+          </aside>
+        </section>
+
+        <section className="analysis-stack-stage">
           <ResultStage
             sourceType={props.sourceType}
             sourceName={props.sourceName}
@@ -129,12 +128,26 @@ export function AnalysisPage(props: AnalysisPageProps) {
             onStageDetailHover={props.onStageDetailHover}
             stageDetailTarget={props.stageDetailTarget}
           />
+        </section>
 
-          <div className="analysis-footer-link">
-            <Link to="/history" className="secondary-button history-link-button">
-              查看更多历史结果与趋势分析
-            </Link>
-          </div>
+        <section className="analysis-stack-bottom">
+          <MetricsPanel
+            metricCards={props.metricCards}
+            ratioChartData={props.ratioChartData}
+            barChartData={props.barChartData}
+            modelSummary={props.modelSummary}
+            systemSummary={props.systemSummary}
+            onMetricHover={props.onMetricHover}
+            onMetricClick={props.onMetricClick}
+            onCompositionHover={props.onCompositionHover}
+            compositionDetail={props.compositionDetail}
+          />
+
+          <DetailInspector
+            detailTarget={props.activeDetailTarget}
+            isLocked={props.isDetailLocked}
+            onUnlock={props.onUnlockDetail}
+          />
         </section>
       </main>
     </div>

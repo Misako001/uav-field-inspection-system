@@ -13,6 +13,8 @@ interface HistoryPageProps {
   onSelectHistoryType: (value: string) => void;
   onSelectHistoryStatus: (value: string) => void;
   onOpenJob: (jobId: number) => void;
+  onDeleteJob: (jobId: number) => void;
+  deletingJobId: number | null;
   onJobHover: (jobId: number | null) => void;
   onJobLock: (jobId: number) => void;
   historyDetailTarget: DetailTarget;
@@ -32,6 +34,8 @@ export function HistoryPage({
   onSelectHistoryType,
   onSelectHistoryStatus,
   onOpenJob,
+  onDeleteJob,
+  deletingJobId,
   onJobHover,
   onJobLock,
   historyDetailTarget,
@@ -56,6 +60,8 @@ export function HistoryPage({
             onSelectHistoryType={onSelectHistoryType}
             onSelectHistoryStatus={onSelectHistoryStatus}
             onOpenJob={onOpenJob}
+            onDeleteJob={onDeleteJob}
+            deletingJobId={deletingJobId}
             onJobHover={onJobHover}
             onJobLock={onJobLock}
           />

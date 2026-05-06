@@ -23,6 +23,34 @@ export function HomePage({
 
   return (
     <div className="home-page">
+      <section className="panel home-entry-panel home-entry-panel--lead">
+        <div className="panel-header">
+          <div>
+            <h2>快捷入口</h2>
+            <span>先进入要用的功能页，再按任务需要查看总览和最近分析</span>
+          </div>
+        </div>
+
+        <div className="home-entry-grid home-entry-grid--lead">
+          {entryCards.map((card) => (
+            <button
+              key={card.id}
+              type="button"
+              className={`home-entry-card tone-${card.tone}`}
+              onClick={() => card.route && onEntryClick(card.route)}
+            >
+              <span>{card.subtitle}</span>
+              <strong>{card.title}</strong>
+              <p>{card.description}</p>
+              <div className="home-entry-card__footer">
+                <em>{card.value}</em>
+                <b>进入页面</b>
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="panel home-hero">
         <div className="home-hero__copy">
           <span className="eyebrow">系统总览</span>
@@ -90,34 +118,6 @@ export function HomePage({
               <span>风险指数</span>
               <strong>{dashboard?.detection.risk_index?.toFixed(1) ?? '--'}</strong>
             </div>
-          </div>
-        </div>
-
-        <div className="panel home-entry-panel">
-          <div className="panel-header">
-            <div>
-              <h2>快捷入口</h2>
-              <span>点击进入对应功能页，不再依赖滚动查找模块</span>
-            </div>
-          </div>
-
-          <div className="home-entry-grid">
-            {entryCards.map((card) => (
-              <button
-                key={card.id}
-                type="button"
-                className={`home-entry-card tone-${card.tone}`}
-                onClick={() => card.route && onEntryClick(card.route)}
-              >
-                <span>{card.subtitle}</span>
-                <strong>{card.title}</strong>
-                <p>{card.description}</p>
-                <div className="home-entry-card__footer">
-                  <em>{card.value}</em>
-                  <b>进入页面</b>
-                </div>
-              </button>
-            ))}
           </div>
         </div>
       </section>

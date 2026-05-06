@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.schemas import (
+    AnalysisDeleteResponse,
     AnalysisImageResponse,
     AnalysisJobDetailRead,
     AnalysisJobListRead,
@@ -13,6 +14,7 @@ from app.services.analysis import (
     analysis_realtime_hub,
     as_public_storage_path,
     create_analysis_job,
+    delete_analysis_job,
     get_analysis_job_detail,
     list_analysis_jobs,
     run_image_analysis,
@@ -79,6 +81,11 @@ def read_analysis_job(job_id: int, db: Session = Depends(get_db)) -> AnalysisJob
 @router.get("/jobs/{job_id}/results", response_model=AnalysisJobDetailRead)
 def read_analysis_results(job_id: int, db: Session = Depends(get_db)) -> AnalysisJobDetailRead:
     return get_analysis_job_detail(db, job_id)
+
+
+@router.delete("/jobs/{job_id}", response_model=AnalysisDeleteResponse)
+def delete_analysis_history(job_id: int, db: Session = Depends(get_db)) -> AnalysisDeleteResponse:
+    return delete_analysis_job(db, job_id)
 
 
 @router.post("/jobs/{job_id}/stop", response_model=AnalysisStopResponse)

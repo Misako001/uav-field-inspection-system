@@ -139,6 +139,12 @@ export interface AnalysisImageResponse {
   result: AnalysisResult;
 }
 
+export interface AnalysisDeleteResponse {
+  job_id: number;
+  status: string;
+  message: string;
+}
+
 export interface AnalysisRealtimePayload {
   event: string;
   emitted_at: string;
@@ -201,6 +207,7 @@ export interface ResultGalleryItem {
   label: string;
   description: string;
   imagePath: string;
+  previewImagePath?: string;
   tone: Tone;
 }
 
