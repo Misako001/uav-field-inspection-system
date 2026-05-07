@@ -64,6 +64,7 @@ interface AnalysisPageProps {
   onMetricClick: (key: string) => void;
   onCompositionHover: (target: DetailTarget | null) => void;
   compositionDetail: DetailTarget;
+  isMockFallback: boolean;
 }
 
 export function AnalysisPage(props: AnalysisPageProps) {
@@ -105,6 +106,12 @@ export function AnalysisPage(props: AnalysisPageProps) {
         </section>
 
         <section className="analysis-stack-stage">
+          {props.isMockFallback ? (
+            <div className="panel analysis-warning-panel">
+              <strong>当前任务正在使用演示回退模型</strong>
+              <span>真实 checkpoint 当前未加载成功，所以这次结果只能用于联调页面，不能代表真实烟田分割质量。</span>
+            </div>
+          ) : null}
           <ResultStage
             sourceType={props.sourceType}
             sourceName={props.sourceName}

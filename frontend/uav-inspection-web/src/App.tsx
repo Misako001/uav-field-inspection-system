@@ -50,10 +50,10 @@ const metricDefinitions: MetricDefinition[] = [
   },
   {
     key: 'components',
-    label: '杂草连通域数量',
-    shortLabel: '连通域',
-    description: '基于抑噪后杂草掩码连通域的计数结果，用于判断疑似杂草团块数量。',
-    formula: '抑噪后的杂草二值掩码连通域计数',
+    label: '杂草斑块数（过滤后）',
+    shortLabel: '斑块数',
+    description: '基于抑噪后杂草掩码的过滤结果统计疑似杂草斑块数量，用来辅助判断杂草分布密度，不等同于精准株数。',
+    formula: '过滤后的杂草二值掩码连通域计数',
     tone: 'warning',
   },
   {
@@ -303,7 +303,7 @@ export default function App() {
       title: `关键帧 ${frame.frame_index}`,
       timestampLabel: `${frame.frame_timestamp_seconds.toFixed(1)}s`,
       coverageLabel: `覆盖率 ${formatPercent(frame.weed_area_ratio || frame.weed_coverage_ratio)}`,
-      plantLabel: `连通域 ${frame.weed_component_count || frame.estimated_plant_count}`,
+      plantLabel: `斑块数 ${frame.weed_component_count || frame.estimated_plant_count}`,
       confidenceLabel: `置信度 ${(frame.average_confidence * 100).toFixed(1)}%`,
       previewImagePath: toAbsoluteAssetUrl(frame.overlay_segmentation_path || frame.heatmap_image_path),
       active: frame.id === selectedFrame?.id,
@@ -327,12 +327,12 @@ export default function App() {
       },
       {
         key: 'components',
-        label: '杂草连通域数量',
+        label: '杂草斑块数（过滤后）',
         value: currentResult || selectedFrame ? `${selectedMetrics.componentCount}` : '--',
         tone: 'warning',
         hint: '抑噪后统计',
-        footnote: '经过连通域过滤，尽量压掉地膜边缘和细长误检。',
-        meter: toneMeter(selectedMetrics.componentCount / 120),
+        footnote: '只统计过滤后的疑似杂草斑块，尽量压掉地膜边缘和细碎误检。',
+        meter: toneMeter(selectedMetrics.componentCount / 80),
       },
       {
         key: 'confidence',
@@ -374,35 +374,59 @@ export default function App() {
   }, [currentResult, selectedFrame, selectedJob, selectedMetrics]);
 
   const galleryItems = useMemo<ResultGalleryItem[]>(() => ([
-    {
-      key: 'source',
-      label: '原图',
-      description: '田间原始航拍图像',
-      imagePath: sourceImagePath,
-      tone: 'neutral',
-    },
-    {
-      key: 'heatmap',
-      label: '热力图',
-      description: '杂草概率热度分布',
-      imagePath: heatmapImagePath,
-      tone: 'warning',
-    },
-    {
-      key: 'segmentation',
-      label: '分割结果图',
-      description: '背景 / 烟株 / 杂草 三分类叠加图',
-      imagePath: segmentationImagePath,
-      previewImagePath: segmentationPreviewPath,
-      tone: 'success',
-    },
-    {
-      key: 'mask',
-      label: '掩码图',
-      description: '杂草二值掩码辅助视图',
-      imagePath: maskImagePath,
-      tone: 'info',
-    },
+      {
+        key: 'source',
+        label: '原图',
+        description: '田间原始航拍图像',
+        imagePath: sourceImagePath,
+        tone: 'neutral',
+        legendTitle: '图像说明',
+        legendNote: '原始图像不包含模型标注，用来和其余结果图对照查看。',
+        legendItems: [
+          { label: '原始航拍图', color: '#7f93a8' },
+        ],
+      },
+      {
+        key: 'heatmap',
+        label: '热力图',
+        description: '杂草概率热度分布',
+        imagePath: heatmapImagePath,
+        tone: 'warning',
+        legendTitle: '热力图例',
+        legendNote: '颜色越暖，表示模型认为该区域越接近杂草。',
+        legendItems: [
+          { label: '低概率', gradient: 'linear-gradient(90deg, #173cff, #0bd978, #f5cb1b, #ff5b52)' },
+          { label: '高概率', color: '#ff5b52' },
+        ],
+      },
+      {
+        key: 'segmentation',
+        label: '分割结果图',
+        description: '背景 / 烟株 / 杂草 三分类叠加图',
+        imagePath: segmentationImagePath,
+        previewImagePath: segmentationPreviewPath,
+        tone: 'success',
+        legendTitle: '类别图例',
+        legendNote: '浅橙色代表烟株，绿色代表杂草，深灰代表背景或非植被区域。',
+        legendItems: [
+          { label: '背景', color: '#242e3a' },
+          { label: '烟株', color: '#ecba88' },
+          { label: '杂草', color: '#5ce276' },
+        ],
+      },
+      {
+        key: 'mask',
+        label: '掩码图',
+        description: '杂草二值掩码辅助视图',
+        imagePath: maskImagePath,
+        tone: 'info',
+        legendTitle: '掩码图例',
+        legendNote: '绿色区域表示杂草，深色区域表示非杂草。',
+        legendItems: [
+          { label: '杂草区域', color: '#5ce276' },
+          { label: '非杂草区域', color: '#0c1520' },
+        ],
+      },
   ]), [heatmapImagePath, maskImagePath, segmentationImagePath, segmentationPreviewPath, sourceImagePath]);
 
   const activePreviewItem = useMemo(
@@ -412,8 +436,8 @@ export default function App() {
 
   const ratioChartData = useMemo(
     () => [
-      { name: '杂草', value: Number((selectedMetrics.weedAreaRatio * 100).toFixed(2)), tone: 'danger' as const },
-      { name: '烟株', value: Number((selectedMetrics.cropAreaRatio * 100).toFixed(2)), tone: 'success' as const },
+      { name: '杂草', value: Number((selectedMetrics.weedAreaRatio * 100).toFixed(2)), tone: 'success' as const },
+      { name: '烟株', value: Number((selectedMetrics.cropAreaRatio * 100).toFixed(2)), tone: 'warning' as const },
       { name: '背景', value: Number((selectedMetrics.backgroundAreaRatio * 100).toFixed(2)), tone: 'muted' as const },
     ],
     [selectedMetrics.backgroundAreaRatio, selectedMetrics.cropAreaRatio, selectedMetrics.weedAreaRatio],
@@ -421,8 +445,8 @@ export default function App() {
 
   const barChartData = useMemo(
     () => [
-      { name: '杂草像素面积', value: selectedMetrics.weedPixelArea, tone: 'danger' as const },
-      { name: '连通域数量', value: selectedMetrics.componentCount, tone: 'warning' as const },
+      { name: '杂草像素面积', value: selectedMetrics.weedPixelArea, tone: 'success' as const },
+      { name: '杂草斑块数', value: selectedMetrics.componentCount, tone: 'warning' as const },
       { name: '平均置信度(%)', value: Number((selectedMetrics.avgConfidence * 100).toFixed(1)), tone: 'info' as const },
     ],
     [selectedMetrics.avgConfidence, selectedMetrics.componentCount, selectedMetrics.weedPixelArea],
@@ -542,9 +566,9 @@ export default function App() {
       imagePath: activePreviewItem?.imagePath || sourceImagePath || undefined,
       note: '建议把原图、热力图和彩色分割图一起对照，看统计值是否和图像里的烟株、杂草位置一致。',
       fields: [
-        { label: '杂草占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.weedAreaRatio) : '--', tone: 'danger' },
-        { label: '烟株占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.cropAreaRatio) : '--', tone: 'success' },
-        { label: '连通域数量', value: currentResult || selectedFrame ? `${selectedMetrics.componentCount}` : '--', tone: 'warning' },
+        { label: '杂草占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.weedAreaRatio) : '--', tone: 'success' },
+        { label: '烟株占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.cropAreaRatio) : '--', tone: 'warning' },
+        { label: '杂草斑块数', value: currentResult || selectedFrame ? `${selectedMetrics.componentCount}` : '--', tone: 'warning' },
         { label: '结果时间', value: selectedMetrics.resultTime },
       ],
     };
@@ -592,8 +616,8 @@ export default function App() {
       ),
       note: '点击关键帧后，主舞台会锁定这张图像，右侧详情也会保持对应统计，方便逐帧对照查看。',
       fields: [
-        { label: '杂草占比', value: formatPercent(frame.weed_area_ratio || frame.weed_coverage_ratio), tone: 'danger' },
-        { label: '连通域数量', value: `${frame.weed_component_count || frame.estimated_plant_count}`, tone: 'warning' },
+        { label: '杂草占比', value: formatPercent(frame.weed_area_ratio || frame.weed_coverage_ratio), tone: 'success' },
+        { label: '杂草斑块数', value: `${frame.weed_component_count || frame.estimated_plant_count}`, tone: 'warning' },
         { label: '置信度', value: `${(frame.average_confidence * 100).toFixed(1)}%`, tone: 'info' },
         { label: '采样时间', value: `${frame.frame_timestamp_seconds.toFixed(1)} s` },
       ],
@@ -631,13 +655,13 @@ export default function App() {
     type: 'summary',
     title: '当前结果构成',
     subtitle: '环图 / 柱图 / 任务摘要',
-    description: '这组图表直接绑定当前图片结果：环图看面积构成，柱图看像素面积、连通域数量和置信度，不再使用假趋势占位。',
+    description: '这组图表直接绑定当前图片结果：环图看背景/烟株/杂草面积构成，柱图看杂草像素面积、过滤后斑块数和置信度。',
     tone: 'info',
     badge: '结果解读',
-    note: '如果图里大片红色杂草区域对应的环图和柱图也明显升高，说明图像和统计是一致的；反之就该继续校准模型后处理。',
+    note: '如果图里绿色杂草区域对应的环图和柱图也明显升高，说明图像和统计是一致的；反之就该继续校准模型后处理。',
     fields: [
-      { label: '杂草占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.weedAreaRatio) : '--', tone: 'danger' },
-      { label: '烟株占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.cropAreaRatio) : '--', tone: 'success' },
+      { label: '杂草占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.weedAreaRatio) : '--', tone: 'success' },
+      { label: '烟株占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.cropAreaRatio) : '--', tone: 'warning' },
       { label: '背景占比', value: currentResult || selectedFrame ? formatPercent(selectedMetrics.backgroundAreaRatio) : '--', tone: 'muted' },
       { label: '任务进度', value: selectedJob ? `${Math.round(selectedJob.job.progress * 100)}%` : '--', tone: 'warning' },
       { label: '任务状态', value: selectedJob ? statusLabel(selectedJob.job.status) : '待启动' },
@@ -676,8 +700,15 @@ export default function App() {
   const modelSummary = useMemo(() => ([
     { label: '当前后端', value: apiBaseUrl },
     { label: '模型后端', value: selectedJob?.job.model_backend ?? '等待任务接入' },
-    { label: '模型状态', value: isBackendOnline ? '可用' : '离线' },
-    { label: '估算口径', value: '连通域过滤后计数' },
+    {
+      label: '模型状态',
+      value: !isBackendOnline
+        ? '离线'
+        : (selectedJob?.job.model_backend ?? '').includes('mock')
+          ? '演示回退'
+          : '可用',
+    },
+    { label: '统计口径', value: '过滤后杂草斑块数' },
   ]), [isBackendOnline, selectedJob?.job.model_backend]);
 
   const systemSummary = useMemo(() => ([
@@ -1110,6 +1141,7 @@ export default function App() {
               onMetricClick={handleMetricClick}
               onCompositionHover={setHoveredDetailTarget}
               compositionDetail={compositionDetail}
+              isMockFallback={Boolean(selectedJob?.job.model_backend?.includes('mock'))}
             />
           )}
         />

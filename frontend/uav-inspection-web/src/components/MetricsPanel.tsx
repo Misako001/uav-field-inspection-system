@@ -21,9 +21,9 @@ interface MetricsPanelProps {
 }
 
 const toneColors: Record<Tone, string> = {
-  success: '#21d07a',
+  success: '#5ce276',
   info: '#53a6ff',
-  warning: '#f5c24e',
+  warning: '#ecba88',
   danger: '#ff5b6b',
   muted: '#89a2bb',
   neutral: '#9db2c8',

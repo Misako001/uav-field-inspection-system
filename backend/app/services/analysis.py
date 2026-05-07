@@ -76,6 +76,7 @@ class InferenceOutput:
     crop_mask: np.ndarray
     background_mask: np.ndarray
     confidence_summary: float
+    weed_component_count: int
 
 
 class BaseModelRunner:
@@ -91,6 +92,14 @@ class BaseModelRunner:
 
 
 class MockWeedSegmentationRunner(BaseModelRunner):
+    def __init__(self, settings: Settings, backend_label: str = "mock") -> None:
+        super().__init__(settings)
+        self._backend_label = backend_label
+
+    @property
+    def backend_label(self) -> str:
+        return self._backend_label
+
     def infer(self, image_rgb: np.ndarray) -> InferenceOutput:
         hsv = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2HSV).astype(np.float32)
         image = image_rgb.astype(np.float32) / 255.0
@@ -110,27 +119,58 @@ class MockWeedSegmentationRunner(BaseModelRunner):
         texture = cv2.GaussianBlur(np.clip(vegetation_response, 0.0, 1.0), (0, 0), sigmaX=2.6)
         probability = np.clip(texture, 0.0, 1.0)
 
-        mask = (probability >= self.settings.image_result_threshold).astype(np.uint8)
-        kernel = np.ones((3, 3), dtype=np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        vegetation_mask = (probability >= max(self.settings.image_result_threshold * 0.58, 0.30)).astype(np.uint8)
+        vegetation_kernel = np.ones((3, 3), dtype=np.uint8)
+        vegetation_mask = cv2.morphologyEx(vegetation_mask, cv2.MORPH_OPEN, vegetation_kernel)
+        vegetation_mask = cv2.morphologyEx(vegetation_mask, cv2.MORPH_CLOSE, vegetation_kernel)
 
-        vegetation_mask = (probability >= max(self.settings.image_result_threshold * 0.7, 0.24)).astype(np.uint8)
-        crop_mask = np.where((vegetation_mask > 0) & (mask == 0), 1, 0).astype(np.uint8)
-        background_mask = np.where(vegetation_mask > 0, 0, 1).astype(np.uint8)
-        class_map = np.zeros_like(mask, dtype=np.uint8)
+        component_count, labels, stats, _ = cv2.connectedComponentsWithStats(vegetation_mask * 255)
+        total_pixels = int(image_rgb.shape[0] * image_rgb.shape[1])
+        crop_area_threshold = max(int(total_pixels * 0.0001), 5000)
+        weed_area_floor = max(int(total_pixels * 0.00002), 1000, self.settings.weed_min_component_area)
+
+        crop_mask = np.zeros_like(vegetation_mask, dtype=np.uint8)
+        weed_mask = np.zeros_like(vegetation_mask, dtype=np.uint8)
+
+        for index in range(1, component_count):
+            area = int(stats[index, cv2.CC_STAT_AREA])
+            width = max(int(stats[index, cv2.CC_STAT_WIDTH]), 1)
+            height = max(int(stats[index, cv2.CC_STAT_HEIGHT]), 1)
+            aspect_ratio = max(width / height, height / width)
+            fill_ratio = area / float(width * height)
+
+            component_selector = labels == index
+
+            if area >= crop_area_threshold and aspect_ratio <= 3.6 and fill_ratio >= 0.18:
+                crop_mask[component_selector] = 1
+                continue
+
+            if area >= weed_area_floor and area < crop_area_threshold and aspect_ratio <= 4.8 and fill_ratio >= 0.12:
+                weed_mask[component_selector] = 1
+
+        crop_kernel = np.ones((5, 5), dtype=np.uint8)
+        weed_kernel = np.ones((3, 3), dtype=np.uint8)
+        crop_mask = cv2.morphologyEx(crop_mask, cv2.MORPH_CLOSE, crop_kernel)
+        weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_OPEN, weed_kernel)
+        weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_CLOSE, weed_kernel)
+        weed_mask = np.where(crop_mask > 0, 0, weed_mask).astype(np.uint8)
+
+        probability = np.where(weed_mask > 0, np.maximum(probability, 0.65), probability * 0.18)
+        background_mask = np.where((crop_mask > 0) | (weed_mask > 0), 0, 1).astype(np.uint8)
+        class_map = np.zeros_like(vegetation_mask, dtype=np.uint8)
         class_map[crop_mask > 0] = self.settings.model_class_index_crop
-        class_map[mask > 0] = self.settings.model_class_index_weed
+        class_map[weed_mask > 0] = self.settings.model_class_index_weed
 
-        active_probabilities = probability[mask > 0]
+        active_probabilities = probability[weed_mask > 0]
         confidence = float(active_probabilities.mean()) if active_probabilities.size else float(probability.mean() * 0.35)
         return InferenceOutput(
             probability_map=probability,
             class_map=class_map,
-            binary_mask=mask,
+            binary_mask=weed_mask,
             crop_mask=crop_mask,
             background_mask=background_mask,
             confidence_summary=confidence,
+            weed_component_count=_estimate_component_count(weed_mask, weed_area_floor),
         )
 
 
@@ -184,6 +224,7 @@ class CkptModelRunner(BaseModelRunner):
             crop_mask=refined["crop_mask"],
             background_mask=refined["background_mask"],
             confidence_summary=confidence,
+            weed_component_count=int(refined["weed_component_count"]),
         )
 
     def _pad_to_stride(self, tensor, *, stride: int):
@@ -282,7 +323,7 @@ def _get_cached_runner(
             if not allow_mock_fallback:
                 raise
             logger.exception("Failed to load checkpoint model, falling back to mock runner: %s", exc)
-            return MockWeedSegmentationRunner(settings)
+            return MockWeedSegmentationRunner(settings, backend_label="mock-fallback")
     return MockWeedSegmentationRunner(settings)
 
 
@@ -298,8 +339,9 @@ def _write_rgb_image(image_rgb: np.ndarray, destination: Path) -> None:
     cv2.imwrite(str(destination), image_bgr)
 
 
-def _write_mask_image(mask: np.ndarray, destination: Path) -> None:
-    cv2.imwrite(str(destination), (mask.astype(np.uint8) * 255))
+def _write_mask_image(mask_rgb: np.ndarray, destination: Path) -> None:
+    image_bgr = cv2.cvtColor(mask_rgb, cv2.COLOR_RGB2BGR)
+    cv2.imwrite(str(destination), image_bgr)
 
 
 def _write_preview_thumbnail(image_rgb: np.ndarray, destination: Path, *, max_edge: int = 1600, jpeg_quality: int = 86) -> None:
@@ -344,6 +386,12 @@ def _build_vegetation_mask(image_rgb: np.ndarray, settings: Settings) -> np.ndar
     return vegetation.astype(np.uint8)
 
 
+def _component_area_floor(image_shape: tuple[int, int], settings: Settings) -> int:
+    height, width = image_shape
+    adaptive_floor = int(round((height * width) * 0.00002))
+    return max(int(settings.weed_min_component_area), adaptive_floor)
+
+
 def _refine_scene_masks(
     image_rgb: np.ndarray,
     class_map: np.ndarray,
@@ -353,6 +401,9 @@ def _refine_scene_masks(
     weed_index = settings.model_class_index_weed
     crop_index = settings.model_class_index_crop
     vegetation_mask = _build_vegetation_mask(image_rgb, settings)
+    min_component_area = _component_area_floor(image_rgb.shape[:2], settings)
+    crop_seed_mask = np.where((class_map == crop_index) & (vegetation_mask > 0), 1, 0).astype(np.uint8)
+    crop_edge_halo = cv2.dilate(crop_seed_mask, _kernel(settings.weed_crop_edge_kernel_size), iterations=1)
 
     weed_mask = np.where(
         ((class_map == weed_index) | (probability_map >= float(settings.image_result_threshold)))
@@ -366,6 +417,7 @@ def _refine_scene_masks(
 
     component_count, labels, stats, _ = cv2.connectedComponentsWithStats((weed_mask * 255).astype(np.uint8))
     filtered_weed = np.zeros_like(weed_mask, dtype=np.uint8)
+    valid_components = 0
 
     for index in range(1, component_count):
         area = int(stats[index, cv2.CC_STAT_AREA])
@@ -375,14 +427,18 @@ def _refine_scene_masks(
         fill_ratio = area / float(width * height)
         component_mask = labels == index
         component_probability = float(probability_map[component_mask].mean()) if np.any(component_mask) else 0.0
+        crop_edge_overlap = float(crop_edge_halo[component_mask].mean()) if np.any(component_mask) else 0.0
 
-        if area < settings.weed_min_component_area:
+        if area < min_component_area:
             continue
         if aspect_ratio > settings.weed_max_component_aspect_ratio and fill_ratio < settings.weed_min_component_fill_ratio:
             continue
         if component_probability < max(float(settings.image_result_threshold) * 0.82, 0.22):
             continue
+        if crop_edge_overlap >= float(settings.weed_crop_edge_overlap_ratio) and area < (min_component_area * 4):
+            continue
         filtered_weed[component_mask] = 1
+        valid_components += 1
 
     crop_mask = np.where((vegetation_mask > 0) & (filtered_weed == 0), 1, 0).astype(np.uint8)
     background_mask = np.where(vegetation_mask > 0, 0, 1).astype(np.uint8)
@@ -395,6 +451,7 @@ def _refine_scene_masks(
         "weed_mask": filtered_weed,
         "crop_mask": crop_mask,
         "background_mask": background_mask,
+        "weed_component_count": valid_components,
     }
 
 
@@ -405,7 +462,17 @@ def _make_heatmap_overlay(image_rgb: np.ndarray, probability_map: np.ndarray, bi
 
     alpha = np.where(binary_mask[..., None] > 0, 0.52, 0.12).astype(np.float32)
     overlay = (image_rgb.astype(np.float32) * (1.0 - alpha)) + (heat_rgb.astype(np.float32) * alpha)
-    return np.clip(overlay, 0, 255).astype(np.uint8)
+    overlay_rgb = np.clip(overlay, 0, 255).astype(np.uint8)
+    return _draw_legend_panel(
+        overlay_rgb,
+        title="HEATMAP",
+        items=[
+            ("LOW", (23, 60, 255)),
+            ("MED", (11, 217, 120)),
+            ("HIGH", (255, 91, 82)),
+        ],
+        footer="Warmer colors indicate higher weed probability.",
+    )
 
 
 def _make_segmentation_image(class_map: np.ndarray, settings: Settings) -> np.ndarray:
@@ -413,9 +480,18 @@ def _make_segmentation_image(class_map: np.ndarray, settings: Settings) -> np.nd
     weed_index = settings.model_class_index_weed
     image = np.zeros((*class_map.shape, 3), dtype=np.uint8)
     image[class_map == 0] = np.array([36, 46, 58], dtype=np.uint8)
-    image[class_map == crop_index] = np.array([85, 214, 116], dtype=np.uint8)
-    image[class_map == weed_index] = np.array([255, 88, 104], dtype=np.uint8)
-    return image
+    image[class_map == crop_index] = np.array([236, 186, 136], dtype=np.uint8)
+    image[class_map == weed_index] = np.array([92, 226, 118], dtype=np.uint8)
+    return _draw_legend_panel(
+        image,
+        title="SEGMENTATION",
+        items=[
+            ("BG", (36, 46, 58)),
+            ("CROP", (236, 186, 136)),
+            ("WEED", (92, 226, 118)),
+        ],
+        footer="BG = background, CROP = tobacco plants, WEED = weed patches.",
+    )
 
 
 def _make_segmentation_overlay(image_rgb: np.ndarray, class_map: np.ndarray, settings: Settings) -> np.ndarray:
@@ -424,10 +500,113 @@ def _make_segmentation_overlay(image_rgb: np.ndarray, class_map: np.ndarray, set
 
     weed_mask = (class_map == settings.model_class_index_weed).astype(np.uint8)
     crop_mask = (class_map == settings.model_class_index_crop).astype(np.uint8)
-    for mask, color in ((crop_mask, (102, 232, 128)), (weed_mask, (255, 92, 92))):
+    for mask, color in ((crop_mask, (244, 198, 154)), (weed_mask, (92, 226, 118))):
         contours, _ = cv2.findContours((mask * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(overlay, contours, -1, color, 2)
-    return overlay
+    return _draw_legend_panel(
+        overlay,
+        title="OVERLAY",
+        items=[
+            ("CROP", (244, 198, 154)),
+            ("WEED", (92, 226, 118)),
+        ],
+        footer="Peach outlines mark tobacco plants. Green outlines mark weed patches.",
+    )
+
+
+def _make_mask_visual(binary_mask: np.ndarray) -> np.ndarray:
+    mask_rgb = np.zeros((*binary_mask.shape, 3), dtype=np.uint8)
+    mask_rgb[binary_mask == 0] = np.array([12, 21, 32], dtype=np.uint8)
+    mask_rgb[binary_mask > 0] = np.array([92, 226, 118], dtype=np.uint8)
+    return _draw_legend_panel(
+        mask_rgb,
+        title="MASK",
+        items=[
+            ("NON-WEED", (12, 21, 32)),
+            ("WEED", (92, 226, 118)),
+        ],
+        footer="Green pixels are weed patches. Dark pixels are non-weed.",
+    )
+
+
+def _draw_legend_panel(
+    image_rgb: np.ndarray,
+    *,
+    title: str,
+    items: list[tuple[str, tuple[int, int, int]]],
+    footer: str,
+) -> np.ndarray:
+    canvas = image_rgb.copy()
+    height, width = canvas.shape[:2]
+    font_scale = max(0.55, min(1.0, width / 2600.0))
+    thickness = 2 if width >= 2200 else 1
+    padding = int(round(20 * font_scale))
+    swatch = int(round(18 * font_scale))
+    line_gap = int(round(16 * font_scale))
+    title_height = int(round(30 * font_scale))
+    line_height = int(round(28 * font_scale))
+    footer_height = int(round(26 * font_scale))
+    panel_height = padding * 2 + title_height + (line_height * len(items)) + line_gap + footer_height
+    panel_width = min(width - (padding * 2), max(int(round(width * 0.32)), 420))
+
+    overlay = canvas.copy()
+    cv2.rectangle(
+        overlay,
+        (padding, padding),
+        (padding + panel_width, padding + panel_height),
+        (10, 18, 28),
+        thickness=-1,
+    )
+    cv2.addWeighted(overlay, 0.72, canvas, 0.28, 0.0, canvas)
+    cv2.rectangle(
+        canvas,
+        (padding, padding),
+        (padding + panel_width, padding + panel_height),
+        (54, 87, 118),
+        thickness=1,
+    )
+
+    cursor_y = padding + title_height
+    cv2.putText(
+        canvas,
+        title,
+        (padding + padding, cursor_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale,
+        (236, 245, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+    for label, color in items:
+        cursor_y += line_height
+        top = cursor_y - swatch + 2
+        left = padding + padding
+        cv2.rectangle(canvas, (left, top), (left + swatch, top + swatch), color, thickness=-1)
+        cv2.rectangle(canvas, (left, top), (left + swatch, top + swatch), (210, 223, 236), thickness=1)
+        cv2.putText(
+            canvas,
+            label,
+            (left + swatch + 12, cursor_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale * 0.82,
+            (220, 232, 244),
+            thickness,
+            cv2.LINE_AA,
+        )
+
+    footer_y = padding + panel_height - padding
+    cv2.putText(
+        canvas,
+        footer,
+        (padding + padding, footer_y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        font_scale * 0.62,
+        (163, 181, 201),
+        thickness,
+        cv2.LINE_AA,
+    )
+    return canvas
 
 
 def _estimate_component_count(binary_mask: np.ndarray, min_area: int) -> int:
@@ -475,10 +654,11 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
     coverage_ratio = float(weed_pixel_area / total_pixels) if total_pixels else 0.0
     crop_area_ratio = float(crop_pixel_area / total_pixels) if total_pixels else 0.0
     background_area_ratio = float(background_pixel_area / total_pixels) if total_pixels else 0.0
-    component_count = _estimate_component_count(inference.binary_mask, settings.weed_min_component_area)
+    component_count = int(inference.weed_component_count)
     heatmap_rgb = _make_heatmap_overlay(image_rgb, inference.probability_map, inference.binary_mask)
     segmentation_rgb = _make_segmentation_image(inference.class_map, settings)
     segmentation_overlay_rgb = _make_segmentation_overlay(image_rgb, inference.class_map, settings)
+    mask_rgb = _make_mask_visual(inference.binary_mask)
     processing_time_ms = int((time.perf_counter() - started) * 1000)
 
     result_root = settings.storage_root_path / result_dir
@@ -498,7 +678,7 @@ def process_rgb_frame(image_rgb: np.ndarray, *, file_stem: str, result_dir: str)
     _write_rgb_image(segmentation_rgb, segmentation_path)
     _write_rgb_image(segmentation_overlay_rgb, overlay_segmentation_path)
     _write_preview_thumbnail(segmentation_overlay_rgb, thumbnail_path)
-    _write_mask_image(inference.binary_mask, mask_path)
+    _write_mask_image(mask_rgb, mask_path)
 
     return RenderArtifacts(
         runner_backend=runner.backend_label,
@@ -554,7 +734,11 @@ def run_image_analysis(db: Session, job: AnalysisJob, source_file_path: Path) ->
         weed_component_count=artifacts.weed_component_count,
         average_confidence=artifacts.average_confidence,
         processing_time_ms=artifacts.processing_time_ms,
-        summary_note="图片分析完成，已生成热力图、彩色分割图和面积构成统计。",
+        summary_note=(
+            "图片分析完成，已生成热力图、分割结果图、掩码图与区域面积构成。"
+            if "mock" not in artifacts.runner_backend
+            else "当前结果来自演示回退模型，适合联调展示，不代表真实烟田分割精度。"
+        ),
     )
     db.add(result)
     db.flush()

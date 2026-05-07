@@ -633,6 +633,23 @@ button:hover {
   min-height: 0;
 }
 
+.analysis-warning-panel {
+  border-color: rgba(255, 132, 91, 0.45);
+  background: linear-gradient(180deg, rgba(56, 27, 24, 0.94), rgba(24, 18, 24, 0.96));
+}
+
+.analysis-warning-panel strong {
+  display: block;
+  color: #ffd7c8;
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.analysis-warning-panel span {
+  color: #f2bda8;
+  line-height: 1.6;
+}
+
 .analysis-stack-bottom {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.88fr);
@@ -1148,7 +1165,7 @@ button:hover {
 
 .gallery-card__meta {
   display: grid;
-  gap: 4px;
+  gap: 6px;
 }
 
 .gallery-card__meta strong {
@@ -1159,6 +1176,56 @@ button:hover {
   color: #95adc1;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.gallery-card__legend {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.gallery-card__legend em {
+  font-style: normal;
+  color: #dce8f5;
+  font-size: 12px;
+}
+
+.gallery-card__legend small {
+  color: #8ea8bf;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.gallery-card__legend-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.gallery-card__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #dbe8f5;
+  font-size: 12px;
+}
+
+.gallery-card__legend-item b {
+  font-weight: 600;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(220, 232, 245, 0.18);
+  background: #8fa3b8;
+}
+
+.legend-swatch.gradient {
+  width: 64px;
+  border-radius: 999px;
 }
 
 .thumbnail-strip {
@@ -1546,12 +1613,29 @@ button:hover {
   align-items: center;
 }
 
+.lightbox-panel__header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.lightbox-panel__note {
+  color: #96aec3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .lightbox-panel__image {
   width: 100%;
   max-height: calc(100vh - 170px);
   object-fit: contain;
   border-radius: 14px;
   background: #03070c;
+}
+
+.lightbox-panel__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
 }
 
 .tag {

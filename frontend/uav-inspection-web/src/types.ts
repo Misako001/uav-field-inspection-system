@@ -209,6 +209,13 @@ export interface ResultGalleryItem {
   imagePath: string;
   previewImagePath?: string;
   tone: Tone;
+  legendTitle?: string;
+  legendNote?: string;
+  legendItems?: Array<{
+    label: string;
+    color?: string;
+    gradient?: string;
+  }>;
 }
 
 export interface HomeOverviewCard {

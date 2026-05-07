@@ -68,6 +68,23 @@ export function ResultStage({
             <div className="gallery-card__meta">
               <strong>{item.label}</strong>
               <span>{item.description}</span>
+              {item.legendItems?.length ? (
+                <div className="gallery-card__legend">
+                  {item.legendTitle ? <em>{item.legendTitle}</em> : null}
+                  <div className="gallery-card__legend-items">
+                    {item.legendItems.map((legendItem) => (
+                      <span key={`${item.key}-${legendItem.label}`} className="gallery-card__legend-item">
+                        <i
+                          className={`legend-swatch ${legendItem.gradient ? 'gradient' : ''}`}
+                          style={legendItem.gradient ? { background: legendItem.gradient } : { backgroundColor: legendItem.color ?? '#8fa3b8' }}
+                        />
+                        <b>{legendItem.label}</b>
+                      </span>
+                    ))}
+                  </div>
+                  {item.legendNote ? <small>{item.legendNote}</small> : null}
+                </div>
+              ) : null}
             </div>
           </button>
         ))}
@@ -76,7 +93,7 @@ export function ResultStage({
       <div className="stage-footer">
         <div className="stage-footnote">
           <strong>点击卡片即可查看大图</strong>
-          <span>保留原图、热力图、分割图和掩码图四种结果卡片，按需点开查看即可。</span>
+          <span>每张结果卡片都带有图例和口径说明，便于区分背景、烟株、杂草以及概率高低。</span>
         </div>
       </div>
 
@@ -110,12 +127,26 @@ export function ResultStage({
               <div>
                 <span className="eyebrow">放大预览</span>
                 <strong>{lightboxItem.label}</strong>
+                {lightboxItem.legendNote ? <small className="lightbox-panel__note">{lightboxItem.legendNote}</small> : null}
               </div>
               <button type="button" className="secondary-button toolbar-button" onClick={() => setLightboxItem(null)}>
                 关闭
               </button>
             </div>
             <img src={lightboxItem.imagePath} alt={lightboxItem.label} className="lightbox-panel__image" />
+            {lightboxItem.legendItems?.length ? (
+              <div className="lightbox-panel__legend">
+                {lightboxItem.legendItems.map((legendItem) => (
+                  <span key={`lightbox-${lightboxItem.key}-${legendItem.label}`} className="gallery-card__legend-item">
+                    <i
+                      className={`legend-swatch ${legendItem.gradient ? 'gradient' : ''}`}
+                      style={legendItem.gradient ? { background: legendItem.gradient } : { backgroundColor: legendItem.color ?? '#8fa3b8' }}
+                    />
+                    <b>{legendItem.label}</b>
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

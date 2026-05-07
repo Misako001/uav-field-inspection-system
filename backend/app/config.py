@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     weed_min_component_area: int = 20
     weed_max_component_aspect_ratio: float = 5.5
     weed_min_component_fill_ratio: float = 0.16
+    weed_crop_edge_kernel_size: int = 9
+    weed_crop_edge_overlap_ratio: float = 0.62
     vegetation_excess_green_threshold: float = 0.08
     vegetation_saturation_threshold: float = 0.16
     morphology_open_kernel_size: int = 3
