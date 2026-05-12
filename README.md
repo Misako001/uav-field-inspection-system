@@ -118,6 +118,10 @@ VITE_WS_BASE_URL=ws://127.0.0.1:8001
 
 如果你修改后端端口，需要同步修改这两个变量。
 
+生产部署时，可以先用服务器公网 IP 完成第一版上线，域名审核和备案完成后再切换到域名与 HTTPS。示例见：
+
+- `frontend/uav-inspection-web/.env.production.example`
+
 ## 后端配置
 
 后端默认读取：
@@ -228,3 +232,4 @@ npm install
 - `docs/接口文档.md`
 - `docs/数据库设计.md`
 - `docs/开发运行说明.md`
+- `docs/大陆服务器学生版上线清单.md`

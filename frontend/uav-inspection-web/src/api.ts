@@ -8,8 +8,41 @@ import type {
   DashboardRealtimePayload,
 } from './types';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://127.0.0.1:8000';
-const WS_BASE_URL = (import.meta.env.VITE_WS_BASE_URL as string | undefined) ?? 'ws://127.0.0.1:8000';
+function trimTrailingSlash(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function readConfiguredUrl(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimTrailingSlash(trimmed) : undefined;
+}
+
+function getBrowserHttpOrigin(): string | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  return trimTrailingSlash(window.location.origin);
+}
+
+function deriveWebSocketBaseUrl(apiBaseUrl: string): string {
+  if (apiBaseUrl.startsWith('https://')) {
+    return `wss://${apiBaseUrl.slice('https://'.length)}`;
+  }
+  if (apiBaseUrl.startsWith('http://')) {
+    return `ws://${apiBaseUrl.slice('http://'.length)}`;
+  }
+  return apiBaseUrl;
+}
+
+const configuredApiBaseUrl = readConfiguredUrl(import.meta.env.VITE_API_BASE_URL as string | undefined);
+const browserApiBaseUrl = getBrowserHttpOrigin();
+const API_BASE_URL = configuredApiBaseUrl ?? browserApiBaseUrl ?? 'http://127.0.0.1:8001';
+
+const configuredWsBaseUrl = readConfiguredUrl(import.meta.env.VITE_WS_BASE_URL as string | undefined);
+const WS_BASE_URL = configuredWsBaseUrl ?? deriveWebSocketBaseUrl(API_BASE_URL);
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,

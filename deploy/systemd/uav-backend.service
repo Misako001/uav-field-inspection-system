@@ -1,0 +1,16 @@
+[Unit]
+Description=UAV Field Inspection FastAPI Backend
+After=network.target
+
+[Service]
+Type=simple
+User=uav
+Group=uav
+WorkingDirectory=/srv/uav-field-inspection-system/backend
+EnvironmentFile=/srv/uav-field-inspection-system/backend/.env
+ExecStart=/srv/uav-field-inspection-system/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
