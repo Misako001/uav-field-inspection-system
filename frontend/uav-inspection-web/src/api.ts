@@ -46,7 +46,7 @@ const WS_BASE_URL = configuredWsBaseUrl ?? deriveWebSocketBaseUrl(API_BASE_URL);
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30_000,
+  timeout: 180_000,
 });
 
 export const apiBaseUrl = API_BASE_URL;

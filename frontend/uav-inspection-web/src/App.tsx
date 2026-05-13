@@ -822,13 +822,22 @@ export default function App() {
 
       if (nextJobId) {
         const detail = await fetchJobDetail(nextJobId);
-        setSelectedJob(detail);
+        setSelectedJob((current) => {
+          if (!current || current.job.id !== detail.job.id) {
+            return detail;
+          }
+
+          return {
+            ...detail,
+            latest_result: detail.latest_result ?? current.latest_result,
+            frames: detail.frames.length > 0 ? detail.frames : current.frames,
+          };
+        });
       } else if (response.items.length === 0) {
         setSelectedJob(null);
       }
     } catch {
       setMessage('历史记录读取失败，请检查后端分析服务。');
-      setIsBackendOnline(false);
     }
   }
 
