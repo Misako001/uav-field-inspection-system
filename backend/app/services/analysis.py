@@ -190,7 +190,8 @@ class CkptModelRunner(BaseModelRunner):
 
     def infer(self, image_rgb: np.ndarray) -> InferenceOutput:
         original_height, original_width = image_rgb.shape[:2]
-        image_tensor = self._torch.from_numpy(image_rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(self.device)
+        inference_rgb = self._resize_for_inference(image_rgb)
+        image_tensor = self._torch.from_numpy(inference_rgb.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(self.device)
         image_tensor = (image_tensor - self.mean) / self.std
         image_tensor, crop_height, crop_width = self._pad_to_stride(image_tensor, stride=16)
 
@@ -213,6 +214,10 @@ class CkptModelRunner(BaseModelRunner):
 
         probability_map = weed_probability.squeeze(0).detach().cpu().numpy().astype(np.float32)
         class_map_np = class_map.squeeze(0).detach().cpu().numpy().astype(np.uint8)
+        if probability_map.shape[:2] != (original_height, original_width):
+            probability_map = cv2.resize(probability_map, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
+        if class_map_np.shape[:2] != (original_height, original_width):
+            class_map_np = cv2.resize(class_map_np, (original_width, original_height), interpolation=cv2.INTER_NEAREST)
         refined = _refine_scene_masks(image_rgb, class_map_np, probability_map, self.settings)
 
         active_probabilities = probability_map[refined["weed_mask"] > 0]
@@ -226,6 +231,18 @@ class CkptModelRunner(BaseModelRunner):
             confidence_summary=confidence,
             weed_component_count=int(refined["weed_component_count"]),
         )
+
+    def _resize_for_inference(self, image_rgb: np.ndarray) -> np.ndarray:
+        max_side = max(int(get_settings().model_max_input_side), 1)
+        height, width = image_rgb.shape[:2]
+        longest_side = max(height, width)
+        if longest_side <= max_side:
+            return image_rgb
+
+        scale = max_side / float(longest_side)
+        resized_width = max(1, int(round(width * scale)))
+        resized_height = max(1, int(round(height * scale)))
+        return cv2.resize(image_rgb, (resized_width, resized_height), interpolation=cv2.INTER_AREA)
 
     def _pad_to_stride(self, tensor, *, stride: int):
         _, _, height, width = tensor.shape
