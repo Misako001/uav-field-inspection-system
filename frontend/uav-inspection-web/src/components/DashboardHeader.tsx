@@ -15,7 +15,7 @@ export function DashboardHeader({ dashboard, isBackendOnline, message }: Dashboa
           <span className={`status-dot ${isBackendOnline ? 'online' : 'offline'}`} />
           <div>
             <h1>大田无人机巡检监控系统</h1>
-            <p>Web 图像分析工作台 · 杂草分割 · 热力图联动详情</p>
+            <p>Web 图像分析工作台 · 烟株分割 · 热力图联动详情</p>
           </div>
         </div>
         <div className="status-banner">{message}</div>

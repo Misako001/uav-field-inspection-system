@@ -63,7 +63,7 @@ export function AnalysisInputPanel({
           <>
             <div className="input-card__copy">
               <strong>上传单张田间图像</strong>
-              <p>系统会输出杂草概率热力图、分割掩码和面积占比统计，并写入历史记录。</p>
+              <p>系统会输出烟株概率热力图、分割掩码和面积占比统计，并写入历史记录。</p>
             </div>
             <div
               className="dropzone"
@@ -77,7 +77,7 @@ export function AnalysisInputPanel({
               }}
             >
               <strong>拖拽图片到这里</strong>
-              <span>支持 JPG / PNG / JPEG，建议使用无人机正射或俯视巡检画面</span>
+              <span>支持 JPG / PNG / JPEG，大图会自动缩放到安全分析尺寸，建议使用无人机正射或俯视巡检画面</span>
             </div>
             <input className="file-input" accept="image/*" type="file" onChange={onImageUpload} />
             <div className="file-hint">

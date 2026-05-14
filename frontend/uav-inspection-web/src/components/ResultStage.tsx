@@ -93,7 +93,7 @@ export function ResultStage({
       <div className="stage-footer">
         <div className="stage-footnote">
           <strong>点击卡片即可查看大图</strong>
-          <span>每张结果卡片都带有图例和口径说明，便于区分背景、烟株、杂草以及概率高低。</span>
+          <span>每张结果卡片都带有图例和口径说明，便于区分背景、杂草、烟株以及概率高低。</span>
         </div>
       </div>
 

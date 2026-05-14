@@ -15,6 +15,7 @@ import aiofiles
 import cv2
 import numpy as np
 from fastapi import HTTPException, UploadFile, WebSocket
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
@@ -344,11 +345,45 @@ def _get_cached_runner(
     return MockWeedSegmentationRunner(settings)
 
 
+def _scaled_size(width: int, height: int, max_side: int) -> tuple[int, int]:
+    longest_side = max(width, height)
+    if longest_side <= max_side:
+        return width, height
+
+    scale = max_side / float(longest_side)
+    return max(1, int(round(width * scale))), max(1, int(round(height * scale)))
+
+
 def _read_rgb_image(image_path: Path) -> np.ndarray:
-    image_bgr = cv2.imread(str(image_path))
-    if image_bgr is None:
-        raise HTTPException(status_code=400, detail=f"无法读取图像文件: {image_path.name}")
-    return cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    settings = get_settings()
+    max_side = max(1, int(settings.image_max_processing_side))
+
+    try:
+        with Image.open(image_path) as pil_image:
+            draft_width, draft_height = _scaled_size(pil_image.width, pil_image.height, max_side)
+            if pil_image.format and pil_image.format.upper() in {"JPEG", "MPO"}:
+                pil_image.draft("RGB", (draft_width, draft_height))
+
+            pil_image = ImageOps.exif_transpose(pil_image).convert("RGB")
+            original_width, original_height = pil_image.size
+            resized_width, resized_height = _scaled_size(original_width, original_height, max_side)
+
+            if (resized_width, resized_height) != (original_width, original_height):
+                pil_image = pil_image.resize((resized_width, resized_height), Image.Resampling.LANCZOS)
+                logger.info(
+                    "Downscaled uploaded image %s from %sx%s to %sx%s before analysis",
+                    image_path.name,
+                    original_width,
+                    original_height,
+                    resized_width,
+                    resized_height,
+                )
+
+            return np.asarray(pil_image, dtype=np.uint8)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"图像文件不存在: {image_path.name}") from exc
+    except (UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=f"无法读取图像文件: {image_path.name}") from exc
 
 
 def _write_rgb_image(image_rgb: np.ndarray, destination: Path) -> None:
@@ -488,7 +523,7 @@ def _make_heatmap_overlay(image_rgb: np.ndarray, probability_map: np.ndarray, bi
             ("MED", (11, 217, 120)),
             ("HIGH", (255, 91, 82)),
         ],
-        footer="Warmer colors indicate higher weed probability.",
+        footer="Warmer colors indicate higher tobacco probability.",
     )
 
 
@@ -504,10 +539,10 @@ def _make_segmentation_image(class_map: np.ndarray, settings: Settings) -> np.nd
         title="SEGMENTATION",
         items=[
             ("BG", (36, 46, 58)),
-            ("CROP", (236, 186, 136)),
-            ("WEED", (92, 226, 118)),
+            ("WEED", (236, 186, 136)),
+            ("PLANT", (92, 226, 118)),
         ],
-        footer="BG = background, CROP = tobacco plants, WEED = weed patches.",
+        footer="BG = background, WEED = weed patches, PLANT = tobacco plants.",
     )
 
 
@@ -524,10 +559,10 @@ def _make_segmentation_overlay(image_rgb: np.ndarray, class_map: np.ndarray, set
         overlay,
         title="OVERLAY",
         items=[
-            ("CROP", (244, 198, 154)),
-            ("WEED", (92, 226, 118)),
+            ("WEED", (244, 198, 154)),
+            ("PLANT", (92, 226, 118)),
         ],
-        footer="Peach outlines mark tobacco plants. Green outlines mark weed patches.",
+        footer="Peach outlines mark weed patches. Green outlines mark tobacco plants.",
     )
 
 
@@ -539,10 +574,10 @@ def _make_mask_visual(binary_mask: np.ndarray) -> np.ndarray:
         mask_rgb,
         title="MASK",
         items=[
-            ("NON-WEED", (12, 21, 32)),
-            ("WEED", (92, 226, 118)),
+            ("NON-PLANT", (12, 21, 32)),
+            ("PLANT", (92, 226, 118)),
         ],
-        footer="Green pixels are weed patches. Dark pixels are non-weed.",
+        footer="Green pixels are tobacco plants. Dark pixels are non-plant.",
     )
 
 
@@ -752,9 +787,9 @@ def run_image_analysis(db: Session, job: AnalysisJob, source_file_path: Path) ->
         average_confidence=artifacts.average_confidence,
         processing_time_ms=artifacts.processing_time_ms,
         summary_note=(
-            "图片分析完成，已生成热力图、分割结果图、掩码图与区域面积构成。"
+            "图片分析完成，已生成烟株热力图、分割结果图、掩码图与区域面积构成。"
             if "mock" not in artifacts.runner_backend
-            else "当前结果来自演示回退模型，适合联调展示，不代表真实烟田分割精度。"
+            else "当前结果来自演示回退模型，适合联调展示，不代表真实烟株分割精度。"
         ),
     )
     db.add(result)
@@ -1176,7 +1211,7 @@ class AnalysisRealtimeHub:
                 latest_result.average_confidence = artifacts.average_confidence
                 latest_result.processing_time_ms = artifacts.processing_time_ms
                 latest_result.result_time = datetime.now(timezone.utc)
-                latest_result.summary_note = "视频抽帧分析进行中，已生成热力图与彩色分割图。"
+                latest_result.summary_note = "视频抽帧分析进行中，已生成烟株热力图与彩色分割图。"
 
                 sampled_count += 1
                 coverage_sum += artifacts.weed_coverage_ratio
@@ -1309,7 +1344,7 @@ class AnalysisRealtimeHub:
                     latest_result.average_confidence = artifacts.average_confidence
                     latest_result.processing_time_ms = artifacts.processing_time_ms
                     latest_result.result_time = datetime.now(timezone.utc)
-                    latest_result.summary_note = "实时流采样分析进行中，已生成热力图与彩色分割图。"
+                    latest_result.summary_note = "实时流采样分析进行中，已生成烟株热力图与彩色分割图。"
 
                     sampled_count += 1
                     coverage_sum += artifacts.weed_coverage_ratio
@@ -1412,7 +1447,7 @@ class AnalysisRealtimeHub:
                 latest_result.average_confidence = artifacts.average_confidence
                 latest_result.processing_time_ms = artifacts.processing_time_ms
                 latest_result.result_time = datetime.now(timezone.utc)
-                latest_result.summary_note = "模拟实时流采样分析进行中，已生成热力图与彩色分割图。"
+                latest_result.summary_note = "模拟实时流采样分析进行中，已生成烟株热力图与彩色分割图。"
 
                 coverage_sum += artifacts.weed_coverage_ratio
                 confidence_sum += artifacts.average_confidence

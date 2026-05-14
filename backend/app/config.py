@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     model_path: str = ""
     model_device: str = "auto"
     model_max_input_side: int = 1280
-    model_class_index_crop: int = 1
-    model_class_index_weed: int = 2
+    image_max_processing_side: int = 2560
+    model_class_index_crop: int = 2
+    model_class_index_weed: int = 1
     model_allow_mock_fallback: bool = True
     image_result_threshold: float = 0.52
     weed_min_component_area: int = 20

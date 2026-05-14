@@ -46,7 +46,7 @@ const WS_BASE_URL = configuredWsBaseUrl ?? deriveWebSocketBaseUrl(API_BASE_URL);
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 180_000,
+  timeout: 30_000,
 });
 
 export const apiBaseUrl = API_BASE_URL;
@@ -67,6 +67,7 @@ export async function uploadImage(file: File): Promise<AnalysisImageResponse> {
   formData.append('file', file);
   const { data } = await apiClient.post<AnalysisImageResponse>('/api/analysis/images', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
   });
   return data;
 }
@@ -76,6 +77,7 @@ export async function uploadVideo(file: File): Promise<AnalysisJobDetail> {
   formData.append('file', file);
   const { data } = await apiClient.post<AnalysisJobDetail>('/api/analysis/videos', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
   });
   return data;
 }

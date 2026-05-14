@@ -1,6 +1,6 @@
 # 大田无人机巡检监控系统
 
-面向无人机大田巡检、烟田杂草/病虫害识别、视频流监控、告警展示和历史分析的 Web 监控系统。
+面向无人机大田巡检、烟田烟株/杂草识别、视频流监控、告警展示和历史分析的 Web 监控系统。
 
 当前主开发版本由两部分组成：
 
@@ -143,8 +143,10 @@ MODEL_BACKEND=ckpt
 MODEL_TYPE=deeplabv3plus_resnet34
 MODEL_PATH=C:/path/to/best.ckpt
 MODEL_DEVICE=auto
-MODEL_CLASS_INDEX_CROP=1
-MODEL_CLASS_INDEX_WEED=2
+MODEL_MAX_INPUT_SIDE=1280
+IMAGE_MAX_PROCESSING_SIDE=2560
+MODEL_CLASS_INDEX_CROP=2
+MODEL_CLASS_INDEX_WEED=1
 ```
 
 ## 验证启动状态
