@@ -156,22 +156,22 @@ class MockWeedSegmentationRunner(BaseModelRunner):
         weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_CLOSE, weed_kernel)
         weed_mask = np.where(crop_mask > 0, 0, weed_mask).astype(np.uint8)
 
-        probability = np.where(weed_mask > 0, np.maximum(probability, 0.65), probability * 0.18)
+        probability = np.where(crop_mask > 0, np.maximum(probability, 0.65), probability * 0.18)
         background_mask = np.where((crop_mask > 0) | (weed_mask > 0), 0, 1).astype(np.uint8)
         class_map = np.zeros_like(vegetation_mask, dtype=np.uint8)
         class_map[crop_mask > 0] = self.settings.model_class_index_crop
         class_map[weed_mask > 0] = self.settings.model_class_index_weed
 
-        active_probabilities = probability[weed_mask > 0]
+        active_probabilities = probability[crop_mask > 0]
         confidence = float(active_probabilities.mean()) if active_probabilities.size else float(probability.mean() * 0.35)
         return InferenceOutput(
             probability_map=probability,
             class_map=class_map,
-            binary_mask=weed_mask,
-            crop_mask=crop_mask,
+            binary_mask=crop_mask,
+            crop_mask=weed_mask,
             background_mask=background_mask,
             confidence_summary=confidence,
-            weed_component_count=_estimate_component_count(weed_mask, weed_area_floor),
+            weed_component_count=_estimate_component_count(crop_mask, weed_area_floor),
         )
 
 
@@ -209,11 +209,11 @@ class CkptModelRunner(BaseModelRunner):
             logits = logits[:, :, :original_height, :original_width]
 
             probabilities = self._torch.softmax(logits, dim=1)
-            weed_index = self.settings.model_class_index_weed
-            weed_probability = probabilities[:, weed_index, :, :]
+            crop_index = self.settings.model_class_index_crop
+            crop_probability = probabilities[:, crop_index, :, :]
             class_map = probabilities.argmax(dim=1)
 
-        probability_map = weed_probability.squeeze(0).detach().cpu().numpy().astype(np.float32)
+        probability_map = crop_probability.squeeze(0).detach().cpu().numpy().astype(np.float32)
         class_map_np = class_map.squeeze(0).detach().cpu().numpy().astype(np.uint8)
         if probability_map.shape[:2] != (original_height, original_width):
             probability_map = cv2.resize(probability_map, (original_width, original_height), interpolation=cv2.INTER_LINEAR)
@@ -221,16 +221,16 @@ class CkptModelRunner(BaseModelRunner):
             class_map_np = cv2.resize(class_map_np, (original_width, original_height), interpolation=cv2.INTER_NEAREST)
         refined = _refine_scene_masks(image_rgb, class_map_np, probability_map, self.settings)
 
-        active_probabilities = probability_map[refined["weed_mask"] > 0]
+        active_probabilities = probability_map[refined["crop_mask"] > 0]
         confidence = float(active_probabilities.mean()) if active_probabilities.size else float(probability_map.mean())
         return InferenceOutput(
             probability_map=probability_map,
             class_map=refined["class_map"],
-            binary_mask=refined["weed_mask"],
-            crop_mask=refined["crop_mask"],
+            binary_mask=refined["crop_mask"],
+            crop_mask=refined["weed_mask"],
             background_mask=refined["background_mask"],
             confidence_summary=confidence,
-            weed_component_count=int(refined["weed_component_count"]),
+            weed_component_count=int(_estimate_component_count(refined["crop_mask"], _component_area_floor(image_rgb.shape[:2], self.settings))),
         )
 
     def _resize_for_inference(self, image_rgb: np.ndarray) -> np.ndarray:
@@ -532,8 +532,8 @@ def _make_segmentation_image(class_map: np.ndarray, settings: Settings) -> np.nd
     weed_index = settings.model_class_index_weed
     image = np.zeros((*class_map.shape, 3), dtype=np.uint8)
     image[class_map == 0] = np.array([36, 46, 58], dtype=np.uint8)
-    image[class_map == crop_index] = np.array([236, 186, 136], dtype=np.uint8)
-    image[class_map == weed_index] = np.array([92, 226, 118], dtype=np.uint8)
+    image[class_map == crop_index] = np.array([92, 226, 118], dtype=np.uint8)
+    image[class_map == weed_index] = np.array([236, 186, 136], dtype=np.uint8)
     return _draw_legend_panel(
         image,
         title="SEGMENTATION",
@@ -552,7 +552,7 @@ def _make_segmentation_overlay(image_rgb: np.ndarray, class_map: np.ndarray, set
 
     weed_mask = (class_map == settings.model_class_index_weed).astype(np.uint8)
     crop_mask = (class_map == settings.model_class_index_crop).astype(np.uint8)
-    for mask, color in ((crop_mask, (244, 198, 154)), (weed_mask, (92, 226, 118))):
+    for mask, color in ((weed_mask, (244, 198, 154)), (crop_mask, (92, 226, 118))):
         contours, _ = cv2.findContours((mask * 255).astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         cv2.drawContours(overlay, contours, -1, color, 2)
     return _draw_legend_panel(
