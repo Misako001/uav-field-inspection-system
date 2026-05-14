@@ -395,7 +395,7 @@ export default function App() {
         imagePath: heatmapImagePath,
         tone: 'warning',
         legendTitle: '热力图例',
-        legendNote: `颜色越暖，表示模型认为该区域越接近${PRIMARY_LABEL}。`,
+        legendNote: `颜色越暖，表示该区域在当前图中相对更接近${PRIMARY_LABEL}。`,
         legendItems: [
           { label: '低概率', gradient: 'linear-gradient(90deg, #173cff, #0bd978, #f5cb1b, #ff5b52)' },
           { label: '高概率', color: '#ff5b52' },

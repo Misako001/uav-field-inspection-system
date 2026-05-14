@@ -507,8 +507,31 @@ def _refine_scene_masks(
     }
 
 
+def _normalize_heatmap_probability(probability_map: np.ndarray, focus_mask: np.ndarray) -> np.ndarray:
+    focus_values = probability_map[focus_mask > 0]
+    if focus_values.size == 0:
+        global_max = float(probability_map.max()) if probability_map.size else 0.0
+        if global_max <= 1e-6:
+            return np.zeros_like(probability_map, dtype=np.float32)
+        return np.clip(probability_map / global_max, 0.0, 1.0).astype(np.float32)
+
+    low = float(np.percentile(focus_values, 5))
+    high = float(np.percentile(focus_values, 98))
+    if high - low < 1e-6:
+        high = float(focus_values.max())
+        low = float(focus_values.min())
+    if high - low < 1e-6:
+        normalized = np.where(focus_mask > 0, 1.0, 0.0).astype(np.float32)
+        return normalized
+
+    normalized = np.clip((probability_map - low) / (high - low), 0.0, 1.0).astype(np.float32)
+    normalized = np.where(focus_mask > 0, normalized, normalized * 0.18).astype(np.float32)
+    return normalized
+
+
 def _make_heatmap_overlay(image_rgb: np.ndarray, probability_map: np.ndarray, binary_mask: np.ndarray) -> np.ndarray:
-    heat_input = np.clip(probability_map * 255.0, 0, 255).astype(np.uint8)
+    display_probability = _normalize_heatmap_probability(probability_map, binary_mask)
+    heat_input = np.clip(display_probability * 255.0, 0, 255).astype(np.uint8)
     heat_bgr = cv2.applyColorMap(heat_input, cv2.COLORMAP_JET)
     heat_rgb = cv2.cvtColor(heat_bgr, cv2.COLOR_BGR2RGB)
 
@@ -523,7 +546,7 @@ def _make_heatmap_overlay(image_rgb: np.ndarray, probability_map: np.ndarray, bi
             ("MED", (11, 217, 120)),
             ("HIGH", (255, 91, 82)),
         ],
-        footer="Warmer colors indicate higher tobacco probability.",
+        footer="Warmer colors indicate higher relative tobacco probability.",
     )
 
 
