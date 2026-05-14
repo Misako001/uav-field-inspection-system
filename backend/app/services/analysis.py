@@ -230,7 +230,7 @@ class CkptModelRunner(BaseModelRunner):
             crop_mask=refined["weed_mask"],
             background_mask=refined["background_mask"],
             confidence_summary=confidence,
-            weed_component_count=int(_estimate_component_count(refined["crop_mask"], _component_area_floor(image_rgb.shape[:2], self.settings))),
+            weed_component_count=int(refined["crop_component_count"]),
         )
 
     def _resize_for_inference(self, image_rgb: np.ndarray) -> np.ndarray:
@@ -444,6 +444,38 @@ def _component_area_floor(image_shape: tuple[int, int], settings: Settings) -> i
     return max(int(settings.weed_min_component_area), adaptive_floor)
 
 
+def _filter_component_mask(
+    mask: np.ndarray,
+    *,
+    min_area: int,
+    max_aspect_ratio: float | None = None,
+    min_fill_ratio: float | None = None,
+) -> tuple[np.ndarray, int]:
+    component_count, labels, stats, _ = cv2.connectedComponentsWithStats((mask * 255).astype(np.uint8))
+    filtered = np.zeros_like(mask, dtype=np.uint8)
+    valid_components = 0
+
+    for index in range(1, component_count):
+        area = int(stats[index, cv2.CC_STAT_AREA])
+        if area < min_area:
+            continue
+
+        width = max(1, int(stats[index, cv2.CC_STAT_WIDTH]))
+        height = max(1, int(stats[index, cv2.CC_STAT_HEIGHT]))
+        aspect_ratio = max(width, height) / max(1.0, min(width, height))
+        fill_ratio = area / float(width * height)
+
+        if max_aspect_ratio is not None and aspect_ratio > max_aspect_ratio:
+            continue
+        if min_fill_ratio is not None and fill_ratio < min_fill_ratio:
+            continue
+
+        filtered[labels == index] = 1
+        valid_components += 1
+
+    return filtered, valid_components
+
+
 def _refine_scene_masks(
     image_rgb: np.ndarray,
     class_map: np.ndarray,
@@ -455,45 +487,34 @@ def _refine_scene_masks(
     vegetation_mask = _build_vegetation_mask(image_rgb, settings)
     min_component_area = _component_area_floor(image_rgb.shape[:2], settings)
     crop_seed_mask = np.where((class_map == crop_index) & (vegetation_mask > 0), 1, 0).astype(np.uint8)
-    crop_edge_halo = cv2.dilate(crop_seed_mask, _kernel(settings.weed_crop_edge_kernel_size), iterations=1)
+    weed_seed_mask = np.where((class_map == weed_index) & (vegetation_mask > 0), 1, 0).astype(np.uint8)
 
-    weed_mask = np.where(
-        ((class_map == weed_index) | (probability_map >= float(settings.image_result_threshold)))
-        & (vegetation_mask > 0),
-        1,
-        0,
-    ).astype(np.uint8)
-
-    weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_OPEN, _kernel(settings.morphology_open_kernel_size))
+    crop_mask = cv2.morphologyEx(crop_seed_mask, cv2.MORPH_CLOSE, _kernel(settings.morphology_close_kernel_size))
+    crop_mask = cv2.morphologyEx(crop_mask, cv2.MORPH_OPEN, _kernel(settings.morphology_open_kernel_size))
+    weed_mask = cv2.morphologyEx(weed_seed_mask, cv2.MORPH_OPEN, _kernel(settings.morphology_open_kernel_size))
     weed_mask = cv2.morphologyEx(weed_mask, cv2.MORPH_CLOSE, _kernel(settings.morphology_close_kernel_size))
 
-    component_count, labels, stats, _ = cv2.connectedComponentsWithStats((weed_mask * 255).astype(np.uint8))
-    filtered_weed = np.zeros_like(weed_mask, dtype=np.uint8)
-    valid_components = 0
+    crop_mask, crop_component_count = _filter_component_mask(
+        crop_mask,
+        min_area=max(12, min_component_area // 3),
+    )
+    filtered_weed, _ = _filter_component_mask(
+        weed_mask,
+        min_area=max(8, min_component_area // 4),
+        max_aspect_ratio=settings.weed_max_component_aspect_ratio,
+        min_fill_ratio=settings.weed_min_component_fill_ratio * 0.75,
+    )
 
-    for index in range(1, component_count):
-        area = int(stats[index, cv2.CC_STAT_AREA])
-        width = max(1, int(stats[index, cv2.CC_STAT_WIDTH]))
-        height = max(1, int(stats[index, cv2.CC_STAT_HEIGHT]))
-        aspect_ratio = max(width, height) / max(1.0, min(width, height))
-        fill_ratio = area / float(width * height)
-        component_mask = labels == index
-        component_probability = float(probability_map[component_mask].mean()) if np.any(component_mask) else 0.0
-        crop_edge_overlap = float(crop_edge_halo[component_mask].mean()) if np.any(component_mask) else 0.0
+    overlap = (crop_mask > 0) & (filtered_weed > 0)
+    if np.any(overlap):
+        crop_preferred = overlap & (class_map == crop_index)
+        weed_preferred = overlap & ~crop_preferred
+        filtered_weed[crop_preferred] = 0
+        crop_mask[weed_preferred] = 0
 
-        if area < min_component_area:
-            continue
-        if aspect_ratio > settings.weed_max_component_aspect_ratio and fill_ratio < settings.weed_min_component_fill_ratio:
-            continue
-        if component_probability < max(float(settings.image_result_threshold) * 0.82, 0.22):
-            continue
-        if crop_edge_overlap >= float(settings.weed_crop_edge_overlap_ratio) and area < (min_component_area * 4):
-            continue
-        filtered_weed[component_mask] = 1
-        valid_components += 1
-
-    crop_mask = np.where((vegetation_mask > 0) & (filtered_weed == 0), 1, 0).astype(np.uint8)
-    background_mask = np.where(vegetation_mask > 0, 0, 1).astype(np.uint8)
+    crop_mask = np.where((crop_mask > 0) & (vegetation_mask > 0), 1, 0).astype(np.uint8)
+    filtered_weed = np.where((filtered_weed > 0) & (vegetation_mask > 0), 1, 0).astype(np.uint8)
+    background_mask = np.where((crop_mask > 0) | (filtered_weed > 0), 0, 1).astype(np.uint8)
     refined_class_map = np.zeros_like(class_map, dtype=np.uint8)
     refined_class_map[crop_mask > 0] = crop_index
     refined_class_map[filtered_weed > 0] = weed_index
@@ -503,7 +524,7 @@ def _refine_scene_masks(
         "weed_mask": filtered_weed,
         "crop_mask": crop_mask,
         "background_mask": background_mask,
-        "weed_component_count": valid_components,
+        "crop_component_count": crop_component_count,
     }
 
 
@@ -525,7 +546,7 @@ def _normalize_heatmap_probability(probability_map: np.ndarray, focus_mask: np.n
         return normalized
 
     normalized = np.clip((probability_map - low) / (high - low), 0.0, 1.0).astype(np.float32)
-    normalized = np.where(focus_mask > 0, normalized, normalized * 0.18).astype(np.float32)
+    normalized = np.where(focus_mask > 0, 0.42 + (normalized * 0.58), normalized * 0.05).astype(np.float32)
     return normalized
 
 
